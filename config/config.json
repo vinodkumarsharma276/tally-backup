@@ -1,0 +1,32 @@
+{
+  "backup": {
+    "sourcePath": "C:\\Users\\vinodsharma\\Documents\\Tally",
+    "schedule": "0 20 * * *",
+    "maxRetries": 3,
+    "retryDelay": 5000,
+    "compressionLevel": 6,
+    "chunkSizeMB": 50
+  },
+  "googleDrive": {
+    "credentialsPath": "./config/credentials.json",
+    "tokenPath": "./config/token.json",
+    "backupFolderName": "Tally-Backup",
+    "maxFileSize": 104857600,
+    "uploadTimeout": 300000
+  },
+  "deduplication": {
+    "enabled": true,
+    "hashAlgorithm": "SHA256",
+    "blockSize": 1048576
+  },
+  "retention": {
+    "keepDailyBackups": 30,
+    "keepWeeklyBackups": 12,
+    "keepMonthlyBackups": 12
+  },
+  "logging": {
+    "level": "info",
+    "maxFiles": 10,
+    "maxSize": "10m"
+  }
+}
