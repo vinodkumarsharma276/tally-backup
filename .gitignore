@@ -20,6 +20,16 @@ data/
 temp/
 logs/
 
+# Build artifacts and distribution packages
+dist/
+releases/
+*.exe
+*.dmg
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+
 # OS generated files
 .DS_Store
 .DS_Store?
