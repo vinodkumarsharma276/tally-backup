@@ -2,6 +2,8 @@
 
 An automated backup solution for Tally software data to Google Drive with incremental backup, deduplication, and intelligent scheduling capabilities.
 
+> **📦 For Distribution**: To create standalone installer packages for Windows/Linux, see [BUILD.md](BUILD.md) for build instructions.
+
 ## Features
 
 - 🔄 **Incremental Backup**: Only backs up changed files after the initial full backup
