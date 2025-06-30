@@ -147,17 +147,18 @@ class TallyBackup {
 
             // Step 3: Process changed files
             const filesToBackup = [...changes.added, ...changes.modified];
+            const filesToDelete = changes.deleted;
             
-            if (filesToBackup.length === 0) {
-                logger.info('No files to backup, all files are up to date');
+            if (filesToBackup.length === 0 && filesToDelete.length === 0) {
+                logger.info('No files to backup or delete, mirror is up to date');
                 backupStats.success = true;
                 return backupStats;
             }
 
-            // Step 4: Create incremental backup
-            const backupResult = await this.createIncrementalBackup(filesToBackup);
-            backupStats.filesUploaded = backupResult.filesUploaded;
-            backupStats.totalSize = backupResult.totalSize;
+            // Step 4: Sync files to mirror
+            const syncResult = await this.syncMirrorFolder(filesToBackup, filesToDelete);
+            backupStats.filesUploaded = syncResult.filesUploaded;
+            backupStats.totalSize = syncResult.totalSize;
 
             // Step 5: Update file snapshot
             this.backupState.updateFileSnapshot(currentFiles);
@@ -168,8 +169,7 @@ class TallyBackup {
             // Step 7: Save state
             await this.backupState.saveAll();
 
-            // Step 8: Cleanup old backups
-            await this.cleanupOldBackups();
+            // Step 8: No cleanup needed for mirror approach
 
             backupStats.success = true;
             backupStats.duration = Date.now() - startTime;
@@ -208,72 +208,52 @@ class TallyBackup {
     }
 
     /**
-     * Create incremental backup
+     * Sync files to Google Drive mirror folder
      */
-    async createIncrementalBackup(filesToBackup) {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const backupFolderName = `backup-${timestamp}`;
-        
-        logger.info(`Creating incremental backup: ${backupFolderName}`);
-
-        // Create backup folder in Google Drive
-        const backupFolder = await this.googleDrive.createFolder(backupFolderName);
+    async syncMirrorFolder(filesToUpload, filesToDelete = []) {
+        logger.info(`Syncing mirror folder:`);
+        logger.info(`- Files to upload: ${filesToUpload.length}`);
+        logger.info(`- Files to delete: ${filesToDelete.length}`);
         
         let filesUploaded = 0;
         let totalSize = 0;
-        const chunkSize = this.config.backup.chunkSizeMB * 1024 * 1024;
 
-        // Group files into chunks
-        const fileChunks = this.groupFilesIntoChunks(filesToBackup, chunkSize);
-
-        for (let i = 0; i < fileChunks.length; i++) {
-            const chunk = fileChunks[i];
-            const chunkName = `chunk-${i + 1}.zip`;
-            
-            try {
-                // Create archive for chunk
-                const archivePath = path.join(this.tempDir, chunkName);
-                const archiveStats = await FileUtils.createArchive(chunk, archivePath, {
-                    compressionLevel: this.config.backup.compressionLevel,
-                    basePath: this.config.backup.sourcePath
-                });
-
-                // Upload archive to Google Drive
-                await this.googleDrive.uploadFile(archivePath, chunkName, backupFolder.id);
+        try {
+            // Upload/Update files
+            for (const file of filesToUpload) {
+                const relativePath = path.relative(this.config.backup.sourcePath, file.path);
                 
-                filesUploaded += chunk.length;
-                totalSize += archiveStats.totalSize;
+                await this.googleDrive.uploadFileToMirror(file.path, relativePath);
+                
+                filesUploaded++;
+                totalSize += file.size;
 
                 // Log progress
-                logger.info(`Uploaded chunk ${i + 1}/${fileChunks.length}: ${chunkName}`);
-
-                // Cleanup chunk file
-                await fs.remove(archivePath);
-
-            } catch (error) {
-                logger.error(`Failed to process chunk ${i + 1}:`, error);
-                throw error;
+                if (filesUploaded % 10 === 0) {
+                    logger.info(`Synced ${filesUploaded}/${filesToUpload.length} files...`);
+                }
             }
+
+            // Delete removed files
+            for (const file of filesToDelete) {
+                const relativePath = path.relative(this.config.backup.sourcePath, file.path);
+                await this.googleDrive.deleteFileFromMirror(relativePath);
+            }
+
+            logger.info(`Mirror sync completed:`);
+            logger.info(`- Files uploaded/updated: ${filesUploaded}`);
+            logger.info(`- Files deleted: ${filesToDelete.length}`);
+            logger.info(`- Total size: ${FileUtils.formatFileSize(totalSize)}`);
+
+            return {
+                filesUploaded,
+                totalSize
+            };
+
+        } catch (error) {
+            logger.error('Mirror sync failed:', error);
+            throw error;
         }
-
-        // Create backup metadata
-        const metadata = {
-            timestamp: new Date().toISOString(),
-            filesCount: filesToBackup.length,
-            totalSize: totalSize,
-            chunks: fileChunks.length,
-            deduplicationStats: this.backupState.getDeduplicationStats()
-        };
-
-        const metadataPath = path.join(this.tempDir, 'backup-metadata.json');
-        await fs.writeJson(metadataPath, metadata, { spaces: 2 });
-        await this.googleDrive.uploadFile(metadataPath, 'backup-metadata.json', backupFolder.id);
-
-        return {
-            filesUploaded,
-            totalSize,
-            backupFolderId: backupFolder.id
-        };
     }
 
     /**
@@ -344,6 +324,12 @@ class TallyBackup {
      */
     async runManualBackup() {
         logger.info('Starting manual backup...');
+        
+        // Initialize the system if not already done
+        if (!this.backupState || !this.googleDrive) {
+            await this.initialize();
+        }
+        
         return await this.runBackup();
     }
 

@@ -81,12 +81,18 @@ class GoogleDriveService {
         logger.warn(`Authentication required. Please visit this URL and authorize the application:
         ${authUrl}
         
-        IMPORTANT: If you see "App isn't verified" error, follow these steps:
-        1. Click "Advanced" or "Go to Tally Backup Client (unsafe)"
-        2. Or publish your OAuth consent screen in Google Cloud Console
+        IMPORTANT: After authorization, you'll be redirected to localhost.
+        The page may show "This site can't be reached" - that's normal!
         
-        After authorization, you'll receive a code. Please run:
-        node setup-auth.js <authorization_code>`);
+        Look at the URL in your browser address bar. It will look like:
+        http://localhost:3000/oauth2callback?code=4/0AY0e-g7...&scope=...
+        
+        Copy the code between 'code=' and '&scope' and run:
+        node setup-auth.js <authorization_code>
+        
+        If you see "App isn't verified" error:
+        1. Click "Advanced" or "Go to Tally Backup Client (unsafe)"
+        2. Or add your email as test user in Google Cloud Console`);
 
         throw new Error('Authentication required. Please run setup-auth.js first.');
     }
@@ -332,6 +338,232 @@ class GoogleDriveService {
             logger.info(`Cleanup completed: ${oldFiles.length} old backups deleted`);
         } catch (error) {
             logger.error('Failed to cleanup old backups:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Upload individual file to mirror folder maintaining folder structure
+     */
+    async uploadFileToMirror(localFilePath, relativePath) {
+        try {
+            const targetFolderId = await this.ensureFolderStructure(path.dirname(relativePath));
+            const fileName = path.basename(relativePath);
+            
+            // Check if file already exists
+            const existingFile = await this.findFileInFolder(fileName, targetFolderId);
+            
+            const fileMetadata = {
+                name: fileName,
+                parents: [targetFolderId]
+            };
+
+            const media = {
+                mimeType: 'application/octet-stream',
+                body: fs.createReadStream(localFilePath)
+            };
+
+            let response;
+            if (existingFile) {
+                // Update existing file
+                delete fileMetadata.parents; // Can't change parents on update
+                response = await this.drive.files.update({
+                    fileId: existingFile.id,
+                    resource: fileMetadata,
+                    media: media,
+                    fields: 'id, name, size'
+                });
+                logger.info(`Updated file in mirror: ${relativePath}`);
+            } else {
+                // Create new file
+                response = await this.drive.files.create({
+                    resource: fileMetadata,
+                    media: media,
+                    fields: 'id, name, size'
+                });
+                logger.info(`Uploaded new file to mirror: ${relativePath}`);
+            }
+
+            return response.data;
+        } catch (error) {
+            logger.error(`Failed to upload file to mirror ${relativePath}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete file from mirror
+     */
+    async deleteFileFromMirror(relativePath) {
+        try {
+            const folderPath = path.dirname(relativePath);
+            const fileName = path.basename(relativePath);
+            
+            const folderId = await this.findFolderByPath(folderPath);
+            if (!folderId) {
+                logger.warn(`Folder not found for deletion: ${folderPath}`);
+                return;
+            }
+
+            const file = await this.findFileInFolder(fileName, folderId);
+            if (file) {
+                await this.deleteFile(file.id);
+                logger.info(`Deleted file from mirror: ${relativePath}`);
+            } else {
+                logger.warn(`File not found for deletion: ${relativePath}`);
+            }
+        } catch (error) {
+            logger.error(`Failed to delete file from mirror ${relativePath}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Ensure folder structure exists in Google Drive
+     */
+    async ensureFolderStructure(relativeFolderPath) {
+        try {
+            if (!relativeFolderPath || relativeFolderPath === '.' || relativeFolderPath === '') {
+                return this.backupFolderId;
+            }
+
+            const pathParts = relativeFolderPath.split(path.sep).filter(part => part);
+            let currentFolderId = this.backupFolderId;
+
+            for (const folderName of pathParts) {
+                const existingFolder = await this.findFileInFolder(folderName, currentFolderId, 'application/vnd.google-apps.folder');
+                
+                if (existingFolder) {
+                    currentFolderId = existingFolder.id;
+                } else {
+                    const newFolder = await this.createFolderInParent(folderName, currentFolderId);
+                    currentFolderId = newFolder.id;
+                }
+            }
+
+            return currentFolderId;
+        } catch (error) {
+            logger.error(`Failed to ensure folder structure ${relativeFolderPath}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Create folder in specific parent
+     */
+    async createFolderInParent(folderName, parentId) {
+        try {
+            const fileMetadata = {
+                name: folderName,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [parentId]
+            };
+
+            const response = await this.drive.files.create({
+                resource: fileMetadata,
+                fields: 'id, name'
+            });
+
+            logger.info(`Created folder: ${folderName} in parent ${parentId}`);
+            return response.data;
+        } catch (error) {
+            logger.error(`Failed to create folder ${folderName}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Find file in specific folder
+     */
+    async findFileInFolder(fileName, folderId, mimeType = null) {
+        try {
+            let query = `'${folderId}' in parents and name='${fileName}' and trashed=false`;
+            if (mimeType) {
+                query += ` and mimeType='${mimeType}'`;
+            }
+
+            const response = await this.drive.files.list({
+                q: query,
+                fields: 'files(id, name, size, mimeType)'
+            });
+
+            return response.data.files && response.data.files.length > 0 ? response.data.files[0] : null;
+        } catch (error) {
+            logger.error(`Failed to find file ${fileName} in folder ${folderId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Find folder by relative path
+     */
+    async findFolderByPath(relativePath) {
+        try {
+            if (!relativePath || relativePath === '.' || relativePath === '') {
+                return this.backupFolderId;
+            }
+
+            const pathParts = relativePath.split(path.sep).filter(part => part);
+            let currentFolderId = this.backupFolderId;
+
+            for (const folderName of pathParts) {
+                const folder = await this.findFileInFolder(folderName, currentFolderId, 'application/vnd.google-apps.folder');
+                if (!folder) {
+                    return null;
+                }
+                currentFolderId = folder.id;
+            }
+
+            return currentFolderId;
+        } catch (error) {
+            logger.error(`Failed to find folder by path ${relativePath}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * List all files in mirror with their relative paths
+     */
+    async listMirrorFiles() {
+        try {
+            const allFiles = [];
+            await this._listFilesRecursively(this.backupFolderId, '', allFiles);
+            return allFiles;
+        } catch (error) {
+            logger.error('Failed to list mirror files:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Recursively list files in folder structure
+     */
+    async _listFilesRecursively(folderId, currentPath, fileList) {
+        try {
+            const response = await this.drive.files.list({
+                q: `'${folderId}' in parents and trashed=false`,
+                fields: 'files(id, name, size, mimeType, modifiedTime)'
+            });
+
+            for (const item of response.data.files) {
+                const relativePath = currentPath ? path.join(currentPath, item.name) : item.name;
+                
+                if (item.mimeType === 'application/vnd.google-apps.folder') {
+                    // Recursively process folders
+                    await this._listFilesRecursively(item.id, relativePath, fileList);
+                } else {
+                    // Add file to list
+                    fileList.push({
+                        id: item.id,
+                        name: item.name,
+                        relativePath: relativePath,
+                        size: parseInt(item.size) || 0,
+                        modifiedTime: new Date(item.modifiedTime).getTime()
+                    });
+                }
+            }
+        } catch (error) {
+            logger.error(`Failed to list files recursively in folder ${folderId}:`, error);
             throw error;
         }
     }

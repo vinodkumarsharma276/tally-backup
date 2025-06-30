@@ -6,8 +6,10 @@
   "scripts": {
     "start": "node index.js",
     "backup": "node manual-backup.js",
+    "restore": "node restore.js",
     "status": "node status.js",
     "setup-auth": "node setup-auth.js",
+    "setup-auth-auto": "node setup-auth-enhanced.js",
     "test": "echo \"No tests specified\" && exit 1"
   },
   "keywords": [

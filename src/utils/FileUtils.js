@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
 const CryptoJS = require('crypto-js');
-const glob = require('glob');
+const { glob } = require('glob');
 const archiver = require('archiver');
 const logger = require('./logger');
 
@@ -67,38 +67,27 @@ class FileUtils {
             const files = [];
             const pattern = path.join(dirPath, '**', '*').replace(/\\/g, '/');
             
-            return new Promise((resolve, reject) => {
-                glob(pattern, { 
-                    ignore: excludePatterns,
-                    nodir: true,
-                    dot: true
-                }, async (error, matches) => {
-                    if (error) {
-                        reject(error);
-                        return;
-                    }
-
-                    try {
-                        for (const filePath of matches) {
-                            try {
-                                const fileStats = await this.getFileStats(filePath);
-                                files.push(fileStats);
-                                
-                                if (files.length % 100 === 0) {
-                                    logger.debug(`Scanned ${files.length} files...`);
-                                }
-                            } catch (fileError) {
-                                logger.warn(`Skipping file ${filePath}: ${fileError.message}`);
-                            }
-                        }
-                        
-                        logger.info(`Directory scan completed: ${files.length} files found`);
-                        resolve(files);
-                    } catch (processError) {
-                        reject(processError);
-                    }
-                });
+            const matches = await glob(pattern, { 
+                ignore: excludePatterns,
+                nodir: true,
+                dot: true
             });
+
+            for (const filePath of matches) {
+                try {
+                    const fileStats = await this.getFileStats(filePath);
+                    files.push(fileStats);
+                    
+                    if (files.length % 100 === 0) {
+                        logger.debug(`Scanned ${files.length} files...`);
+                    }
+                } catch (fileError) {
+                    logger.warn(`Skipping file ${filePath}: ${fileError.message}`);
+                }
+            }
+            
+            logger.info(`Directory scan completed: ${files.length} files found`);
+            return files;
         } catch (error) {
             logger.error(`Failed to scan directory ${dirPath}:`, error);
             throw error;

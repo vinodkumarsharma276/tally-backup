@@ -1,6 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
-const logger = require('../utils/logger');
+const logger = require('./utils/logger');
 
 class BackupState {
     constructor(dataDir) {

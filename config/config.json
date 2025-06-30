@@ -10,7 +10,7 @@
   "googleDrive": {
     "credentialsPath": "./config/credentials.json",
     "tokenPath": "./config/token.json",
-    "backupFolderName": "Tally-Backup",
+    "backupFolderName": "Tally Backup",
     "maxFileSize": 104857600,
     "uploadTimeout": 300000
   },
