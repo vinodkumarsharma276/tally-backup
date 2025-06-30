@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  tally-backup:
+    build: .
+    container_name: tally-backup-pro
+    restart: unless-stopped
+    volumes:
+      # Configuration files
+      - ./config:/app/config
+      # Data and logs persistence
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # Mount your Tally data directory (adjust path as needed)
+      - /path/to/your/tally/data:/mnt/tally:ro
+    environment:
+      - NODE_ENV=production
+      - TZ=Asia/Kolkata
+    # Optional: expose ports for web interface (future feature)
+    # ports:
+    #   - "3000:3000"
+    networks:
+      - tally-backup-network
+
+  # Optional: Health monitoring with Watchtower
+  watchtower:
+    image: containrrr/watchtower
+    container_name: tally-backup-watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=86400  # Check daily
+      - WATCHTOWER_CLEANUP=true
+    restart: unless-stopped
+    networks:
+      - tally-backup-network
+
+networks:
+  tally-backup-network:
+    driver: bridge

@@ -1,8 +1,11 @@
 {
-  "name": "tally-backup",
+  "name": "tally-backup-pro",
   "version": "1.0.0",
-  "description": "Automated backup solution for Tally software data to Google Drive with incremental backup, deduplication, and scheduling capabilities",
+  "description": "Professional automated backup solution for Tally software data to Google Drive with incremental backup, deduplication, and scheduling capabilities",
   "main": "index.js",
+  "bin": {
+    "tally-backup": "./bin/tally-backup.js"
+  },
   "scripts": {
     "start": "node index.js",
     "backup": "node manual-backup.js",
@@ -10,8 +13,20 @@
     "status": "node status.js",
     "setup-auth": "node setup-auth.js",
     "setup-auth-auto": "node setup-auth-enhanced.js",
-    "test": "echo \"No tests specified\" && exit 1"
+    "setup-wizard": "node setup-wizard.js",
+    "install-service": "node scripts/install-service.js",
+    "install-windows-service": "node scripts/install-windows-service-pro.js",
+    "install-linux-service": "node scripts/install-linux-service-pro.js",
+    "uninstall-service": "node scripts/uninstall-service.js",
+    "uninstall-service-pro": "node scripts/uninstall-service-pro.js",
+    "installer": "node scripts/installer.js",
+    "build": "pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --output dist/tally-backup",
+    "build-release": "node scripts/build-release.js",
+    "package": "npm run build-release",
+    "test": "echo \"No tests specified\" && exit 1",
+    "postinstall": "node scripts/post-install.js"
   },
+  "preferGlobal": true,
   "keywords": [
     "tally",
     "backup",
@@ -19,13 +34,29 @@
     "incremental",
     "deduplication",
     "scheduler",
-    "cron"
+    "cron",
+    "enterprise",
+    "windows",
+    "linux",
+    "cli"
   ],
-  "author": "Vinod Sharma",
-  "license": "ISC",
+  "author": {
+    "name": "Vinod Sharma",
+    "email": "your-email@example.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/your-username/tally-backup-pro",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/tally-backup-pro.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/tally-backup-pro/issues"
+  },
   "engines": {
     "node": ">=14.0.0"
   },
+  "os": ["win32", "linux", "darwin"],
   "dependencies": {
     "archiver": "^7.0.1",
     "chokidar": "^4.0.3",
@@ -34,6 +65,35 @@
     "glob": "^11.0.3",
     "googleapis": "^150.0.1",
     "node-cron": "^4.1.1",
-    "winston": "^3.17.0"
+    "winston": "^3.17.0",
+    "commander": "^12.1.0",
+    "inquirer": "^9.2.23",
+    "node-windows": "^1.0.0-beta.8",
+    "node-linux": "^0.1.12"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  },
+  "pkg": {
+    "scripts": [
+      "index.js",
+      "manual-backup.js",
+      "restore.js",
+      "status.js",
+      "setup-auth.js",
+      "setup-auth-enhanced.js",
+      "setup-wizard.js"
+    ],
+    "assets": [
+      "config/**/*",
+      "src/**/*",
+      "scripts/**/*"
+    ],
+    "targets": [
+      "node18-win-x64",
+      "node18-linux-x64",
+      "node18-macos-x64"
+    ],
+    "outputPath": "dist"
   }
 }
