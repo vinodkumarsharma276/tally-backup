@@ -74,6 +74,18 @@ async function createWindowsPackage() {
     path.join(__dirname, '..', 'config'),
     path.join(winDir, 'config')
   );
+
+  // Copy Windows configuration tool
+  await fs.copy(
+    path.join(__dirname, 'windows-config-tool.bat'),
+    path.join(winDir, 'windows-config-tool.bat')
+  );
+
+  // Copy Windows user guide
+  await fs.copy(
+    path.join(__dirname, '..', 'docs', 'windows-user-guide.md'),
+    path.join(winDir, 'WINDOWS-USER-GUIDE.md')
+  );
   
   // Create Windows installer script
   const installerScript = `@echo off
@@ -85,18 +97,26 @@ if not exist "%PROGRAMFILES%\\TallyBackupPro" mkdir "%PROGRAMFILES%\\TallyBackup
 
 REM Copy files
 copy "tally-backup.exe" "%PROGRAMFILES%\\TallyBackupPro\\"
+copy "windows-config-tool.bat" "%PROGRAMFILES%\\TallyBackupPro\\"
 xcopy "config" "%PROGRAMFILES%\\TallyBackupPro\\config\\" /E /I
 
 REM Add to PATH
 setx PATH "%PATH%;%PROGRAMFILES%\\TallyBackupPro" /M
 
 REM Create desktop shortcut
-echo Creating desktop shortcut...
-powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\\Desktop\\Tally Backup Pro.lnk'); $Shortcut.TargetPath = '%PROGRAMFILES%\\TallyBackupPro\\tally-backup.exe'; $Shortcut.Save()"
+echo Creating desktop shortcuts...
+powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\\Desktop\\Tally Backup Pro.lnk'); $Shortcut.TargetPath = '%PROGRAMFILES%\\TallyBackupPro\\tally-backup.exe'; $Shortcut.Arguments = 'status'; $Shortcut.Save()"
+
+powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\\Desktop\\Tally Backup Config.lnk'); $Shortcut.TargetPath = '%PROGRAMFILES%\\TallyBackupPro\\windows-config-tool.bat'; $Shortcut.Save()"
 
 echo.
 echo Installation completed successfully!
-echo Run "tally-backup init" to get started.
+echo.
+echo To configure Tally Backup Pro:
+echo   1. Run: "%PROGRAMFILES%\\TallyBackupPro\\windows-config-tool.bat"
+echo   2. Or use the desktop shortcut
+echo   3. Follow the setup wizard
+echo.
 pause
 `;
   
@@ -236,6 +256,7 @@ async function createSourcePackage() {
     'README.md',
     'DISTRIBUTION.md',
     'SETUP.md',
+    'BUILD.md',
     'index.js',
     'manual-backup.js',
     'restore.js',
@@ -243,6 +264,9 @@ async function createSourcePackage() {
     'setup-auth.js',
     'setup-auth-enhanced.js',
     'setup-wizard.js',
+    'setup-email.js',
+    'setup-sources.js',
+    'test-email.js',
     'Dockerfile',
     'docker-compose.yml'
   ];
@@ -313,7 +337,9 @@ async function createDockerPackage() {
     'manual-backup.js',
     'restore.js',
     'status.js',
-    'setup-wizard.js'
+    'setup-wizard.js',
+    'setup-email.js',
+    'setup-sources.js'
   ];
   
   for (const file of filesToCopy) {

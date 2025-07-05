@@ -29,6 +29,7 @@ if not exist "%DATA_DIR%\temp" mkdir "%DATA_DIR%\temp"
 
 echo Copying program files...
 copy "tally-backup.exe" "%INSTALL_DIR%\"
+copy "windows-config-tool.bat" "%INSTALL_DIR%\"
 xcopy "config" "%DATA_DIR%\config\" /E /I /Y
 
 REM Create configuration link
@@ -52,6 +53,8 @@ echo Creating start menu shortcuts...
 if not exist "%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Tally Backup Pro" mkdir "%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Tally Backup Pro"
 
 powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Tally Backup Pro\Tally Backup Pro.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\tally-backup.exe'; $Shortcut.Arguments = 'status'; $Shortcut.WorkingDirectory = '%DATA_DIR%'; $Shortcut.Save()"
+
+powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Tally Backup Pro\Configuration Tool.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\windows-config-tool.bat'; $Shortcut.WorkingDirectory = '%DATA_DIR%'; $Shortcut.Description = 'Configure Tally Backup Pro'; $Shortcut.Save()"
 
 powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Tally Backup Pro\Setup Wizard.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\tally-backup.exe'; $Shortcut.Arguments = 'setup-wizard'; $Shortcut.WorkingDirectory = '%DATA_DIR%'; $Shortcut.Save()"
 
@@ -90,9 +93,16 @@ echo Data will be stored in:
 echo   %DATA_DIR%
 echo.
 echo Next steps:
-echo   1. Open a new Command Prompt
-echo   2. Run: tally-backup setup-wizard
-echo   3. Follow the setup instructions
+echo   1. Use Start Menu: "Tally Backup Pro" ^> "Configuration Tool"
+echo   2. Or run: "%INSTALL_DIR%\windows-config-tool.bat"
+echo   3. Follow the setup wizard for initial configuration
+echo.
+echo The Configuration Tool provides:
+echo   - Initial Setup Wizard
+echo   - Google Drive Authentication
+echo   - Backup/Restore Sources Configuration
+echo   - Email Notifications Setup
+echo   - Manual Backup/Restore
 echo.
 echo Or use the desktop shortcut to get started!
 echo.

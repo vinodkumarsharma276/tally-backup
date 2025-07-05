@@ -6,37 +6,29 @@ const { execSync } = require('child_process');
 
 /**
  * Setup Wizard for Tally Backup Pro
- * Interactive setup for first-time users
+ * Interactive setup for first-time users with bidirectional sync support
  */
 
 async function main() {
   console.log('🧙‍♂️ Tally Backup Pro Setup Wizard');
-  console.log('==================================');
+  console.log('===================================');
   
   try {
     const inquirer = await import('inquirer');
     
     // Welcome message
     console.log('\n👋 Welcome to Tally Backup Pro!');
-    console.log('This wizard will help you set up automated backups for your Tally data.\n');
+    console.log('This wizard will help you set up automated backups and restores.');
+    console.log('You can configure both:');
+    console.log('  📤 Backup: Local folders → Google Drive');
+    console.log('  📥 Restore: Google Drive → Local folders');
+    console.log('');
     
     // Step 1: Basic Configuration
     console.log('📋 Step 1: Basic Configuration');
     console.log('------------------------------');
     
-    const config = await inquirer.default.prompt([
-      {
-        type: 'input',
-        name: 'tallyPath',
-        message: 'Path to your Tally data folder:',
-        default: process.platform === 'win32' 
-          ? 'C:\\Users\\%USERNAME%\\Documents\\Tally' 
-          : '/home/$USER/Tally',
-        validate: (input) => {
-          if (!input.trim()) return 'Please enter a valid path';
-          return true;
-        }
-      },
+    const basicConfig = await inquirer.default.prompt([
       {
         type: 'input',
         name: 'schedule',

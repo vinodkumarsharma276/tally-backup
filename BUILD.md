@@ -1,6 +1,12 @@
 # 🚀 Building Distribution Packages
 
-The distribution packages (`dist/` and `releases/` folders) are **not included in the Git repository** due to their large size (100+ MB). Instead, they are built locally when needed.
+Tally Backup Pro supports **bidirectional sync** (Local ↔ Google Drive) and can be distributed across multiple platforms. The distribution packages (`dist/` and `releases/` folders) are **not included in the Git repository** due to their large size (100+ MB). Instead, they are built locally when needed.
+
+## ✨ New Features in This Build
+- **🔄 Bidirectional Operations**: Single backup run handles both backup (Local → Google Drive) and restore (Google Drive → Local)
+- **📧 Multiple Google Drive Links**: Email notifications include separate links for each backup/restore folder
+- **🛠️ Enhanced Configuration**: Interactive setup with operation type selection (backup/restore)
+- **📁 Automatic Folder Creation**: Creates restore destination folders automatically
 
 ## 📦 How to Build Distribution Packages
 

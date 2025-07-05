@@ -16,7 +16,7 @@ class BackupState {
             totalFilesBackedUp: 0,
             totalSizeBackedUp: 0
         };
-        this.fileSnapshot = new Map();
+        this.fileSnapshots = new Map(); // Map of sourceName -> fileSnapshot
         this.deduplicationIndex = new Map();
     }
 
@@ -79,14 +79,21 @@ class BackupState {
         try {
             if (await fs.pathExists(this.snapshotFile)) {
                 const snapshotData = await fs.readJson(this.snapshotFile);
-                this.fileSnapshot = new Map(Object.entries(snapshotData));
-                logger.info(`Loaded file snapshot with ${this.fileSnapshot.size} entries`);
+                
+                // Convert to Map of Maps for multiple sources
+                this.fileSnapshots = new Map();
+                for (const [sourceName, sourceData] of Object.entries(snapshotData)) {
+                    this.fileSnapshots.set(sourceName, new Map(Object.entries(sourceData)));
+                }
+                
+                const totalEntries = Array.from(this.fileSnapshots.values()).reduce((sum, map) => sum + map.size, 0);
+                logger.info(`Loaded file snapshots with ${totalEntries} total entries across ${this.fileSnapshots.size} sources`);
             } else {
                 logger.info('No existing file snapshot found');
             }
         } catch (error) {
             logger.warn('Failed to load file snapshot:', error.message);
-            this.fileSnapshot = new Map();
+            this.fileSnapshots = new Map();
         }
     }
 
@@ -95,7 +102,10 @@ class BackupState {
      */
     async saveFileSnapshot() {
         try {
-            const snapshotData = Object.fromEntries(this.fileSnapshot);
+            const snapshotData = {};
+            for (const [sourceName, sourceSnapshot] of this.fileSnapshots.entries()) {
+                snapshotData[sourceName] = Object.fromEntries(sourceSnapshot);
+            }
             await fs.writeJson(this.snapshotFile, snapshotData, { spaces: 2 });
         } catch (error) {
             logger.error('Failed to save file snapshot:', error);
@@ -152,13 +162,36 @@ class BackupState {
     /**
      * Get previous file snapshot as array
      */
-    getPreviousFileSnapshot() {
-        return Array.from(this.fileSnapshot.entries()).map(([path, data]) => ({
+    getPreviousFileSnapshot(sourceName = 'default') {
+        if (!this.fileSnapshots.has(sourceName)) {
+            return [];
+        }
+        
+        const snapshot = this.fileSnapshots.get(sourceName);
+        return Array.from(snapshot.entries()).map(([path, data]) => ({
             path,
             hash: data.hash,
             size: data.size,
             modifiedTime: data.modifiedTime
         }));
+    }
+
+    /**
+     * Update file snapshot for a specific source
+     */
+    updateFileSnapshot(files, sourceName = 'default') {
+        const snapshot = new Map();
+        
+        files.forEach(file => {
+            snapshot.set(file.path, {
+                hash: file.hash,
+                size: file.size,
+                modifiedTime: file.modifiedTime
+            });
+        });
+        
+        this.fileSnapshots.set(sourceName, snapshot);
+        logger.info(`Updated file snapshot for source: ${sourceName} (${files.length} files)`);
     }
 
     /**
@@ -237,6 +270,24 @@ class BackupState {
      */
     failBackup() {
         this.state.failedBackups++;
+    }
+
+    /**
+     * Update last backup with overall statistics
+     */
+    updateLastBackup(stats) {
+        this.state.lastBackupTime = Date.now();
+        this.state.totalBackups++;
+        
+        if (stats.success) {
+            this.state.lastSuccessfulBackup = Date.now();
+            this.state.totalFilesBackedUp += stats.totalFilesProcessed || stats.filesProcessed || 0;
+            this.state.totalSizeBackedUp += stats.totalSize || 0;
+        } else {
+            this.state.failedBackups++;
+        }
+        
+        logger.info(`Updated backup state: Total backups: ${this.state.totalBackups}, Success rate: ${((this.state.totalBackups - this.state.failedBackups) / this.state.totalBackups * 100).toFixed(1)}%`);
     }
 
     /**

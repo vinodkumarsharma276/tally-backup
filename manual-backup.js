@@ -22,10 +22,11 @@ async function runManualBackup() {
         
         if (stats.success) {
             logger.info('\n✅ Manual backup completed successfully!');
-            logger.info(`Files processed: ${stats.filesProcessed}`);
-            logger.info(`Files uploaded: ${stats.filesUploaded}`);
+            logger.info(`Files processed: ${stats.totalFilesProcessed}`);
+            logger.info(`Files uploaded: ${stats.totalFilesUploaded}`);
+            logger.info(`Files downloaded: ${stats.totalFilesDownloaded}`);
             logger.info(`Total size: ${(stats.totalSize / 1024 / 1024).toFixed(2)} MB`);
-            logger.info(`Duration: ${(stats.duration / 1000).toFixed(2)} seconds`);
+            logger.info(`Duration: ${(stats.totalDuration / 1000).toFixed(2)} seconds`);
         } else {
             logger.error('\n❌ Manual backup failed!');
             process.exit(1);

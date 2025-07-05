@@ -17,6 +17,11 @@ An automated backup solution for Tally software data to Google Drive with increm
 - 🔒 **Snapshot Redundancy**: Backup state stored both locally and in Google Drive
 - 🚀 **Disaster Recovery**: Complete system recovery even if local files are lost
 - 📧 **Email Notifications**: Automatic email reports for backup success/failure with Google Drive links
+- 📂 **Multiple Source Support**: Backup multiple folders to separate Google Drive directories
+- 🔄 **Reverse Backup**: Restore data from Google Drive to local directories
+- 🎯 **Selective Restore**: Choose specific backup sources or restore all at once
+- 🖥️ **Interactive Restore**: User-friendly menu for restore operations
+- 📝 **Command Line Restore**: Scriptable restore operations with multiple options
 
 ## Prerequisites
 
@@ -66,7 +71,23 @@ Edit `config/config.json` to customize settings:
 ```json
 {
   "backup": {
-    "sourcePath": "D:\\Tally Data\\TALLY.ERP9",  // Your Tally data path
+    "sources": [
+      {
+        "name": "Tally Data",
+        "sourcePath": "D:\\Tally Data\\TALLY.ERP9",
+        "backupFolderName": "Tally Backup"
+      },
+      {
+        "name": "Documents",
+        "sourcePath": "C:\\Users\\YourName\\Documents",
+        "backupFolderName": "Documents Backup"
+      },
+      {
+        "name": "Projects",
+        "sourcePath": "C:\\Users\\YourName\\Projects",
+        "backupFolderName": "Projects Backup"
+      }
+    ],
     "schedule": "0 20 * * *",                    // Cron expression (8 PM daily)
     "maxRetries": 3,
     "retryDelay": 5000,
@@ -74,7 +95,8 @@ Edit `config/config.json` to customize settings:
     "chunkSizeMB": 50
   },
   "googleDrive": {
-    "backupFolderName": "Tally-Backup",
+    "credentialsPath": "./config/credentials.json",
+    "tokenPath": "./config/token.json",
     "maxFileSize": 104857600,
     "uploadTimeout": 300000
   },
@@ -105,7 +127,22 @@ Edit `config/config.json` to customize settings:
 }
 ```
 
-### 4. Email Notifications (Optional)
+### 4. Multiple Source Configuration (Optional)
+
+Configure multiple backup sources using the interactive setup:
+
+```bash
+npm run setup-sources
+```
+
+This will help you:
+
+- Add multiple source folders for backup
+- Configure unique Google Drive folder names for each source
+- Edit or remove existing sources
+- Migrate from single source to multiple sources
+
+### 5. Email Notifications (Optional)
 
 Configure email notifications to receive backup reports:
 
@@ -152,6 +189,70 @@ npm run test-email
 ```
 
 Send a test email to verify your email configuration is working correctly.
+
+## Restore Operations
+
+Tally Backup Pro provides comprehensive restore capabilities to recover your data from Google Drive backups.
+
+### Interactive Restore Mode
+
+```bash
+npm run restore
+```
+
+This opens an interactive menu with the following options:
+
+- **Restore all sources to original locations**: Restores all backup sources to their original paths
+- **Restore specific source to original location**: Choose a specific source to restore to its original path
+- **Restore specific source to custom location**: Choose a specific source and specify a custom restore path
+- **List backup contents**: Browse the contents of any backup source without downloading
+- **Quit**: Exit the restore menu
+
+### Command Line Restore
+
+#### List Available Backups
+
+```bash
+node restore.js --list
+```
+
+Shows all available backup sources with file counts and sizes.
+
+#### Restore All Sources
+
+```bash
+node restore.js --all
+```
+
+Restores all backup sources to their original locations.
+
+#### Restore Specific Source
+
+```bash
+# Restore to original location
+node restore.js --source "Tally Data"
+
+# Restore to custom location
+node restore.js --source "Tally Data" "C:\RestoreFolder"
+```
+
+#### Get Help
+
+```bash
+node restore.js --help
+```
+
+Shows detailed usage information for all restore options.
+
+### Restore Features
+
+- **Multiple Source Support**: Restore individual sources or all sources at once
+- **Flexible Destinations**: Restore to original locations or custom directories
+- **Progress Tracking**: Real-time progress updates during restore operations
+- **File Integrity**: Preserves original file structure and metadata
+- **Selective Restore**: Choose specific backup sources to restore
+- **Content Preview**: Browse backup contents before downloading
+- **Comprehensive Logging**: Detailed logs of all restore operations
 
 ## How It Works
 
@@ -214,15 +315,20 @@ tally-backup/
 │   │   ├── logger.js       # Logging utilities
 │   │   └── FileUtils.js    # File operation utilities
 │   ├── TallyBackup.js      # Main backup orchestrator
+│   ├── TallyRestore.js     # Restore operations manager
 │   ├── GoogleDriveService.js # Google Drive integration
-│   └── BackupState.js      # State management
+│   ├── BackupState.js      # State management
+│   └── EmailService.js     # Email notification service
 ├── data/                   # Local backup metadata
 ├── logs/                   # Application logs
 ├── temp/                   # Temporary files (auto-cleanup)
 ├── index.js               # Main entry point
 ├── manual-backup.js       # Manual backup script
+├── restore.js             # Restore operations script
 ├── status.js             # Status checking script
-└── setup-auth.js         # Authentication setup
+├── setup-auth.js         # Authentication setup
+├── setup-sources.js      # Multi-source configuration
+└── setup-email.js        # Email configuration
 ```
 
 ## Logging
@@ -283,6 +389,66 @@ The application provides comprehensive monitoring:
 ### Getting Help
 
 Check the logs in `logs/` directory for detailed error information. Use `npm run status` to get current system health.
+
+## Multiple Source Support
+
+The system now supports backing up multiple source folders to different backup folders in Google Drive. This allows you to:
+
+- **Backup different types of data** (e.g., Tally data, Documents, Projects) to separate folders
+- **Organize your backups** by keeping different data types in their own Google Drive folders
+- **Maintain separate versioning** for each source folder
+
+### Configuration
+
+In your `config/config.json`, you can define multiple sources in the `backup.sources` array:
+
+```json
+{
+  "backup": {
+    "sources": [
+      {
+        "name": "Tally Data",              // Friendly name for logging
+        "sourcePath": "D:\\Tally Data\\TALLY.ERP9",
+        "backupFolderName": "Tally Backup"  // Google Drive folder name
+      },
+      {
+        "name": "Documents",
+        "sourcePath": "C:\\Users\\YourName\\Documents",
+        "backupFolderName": "Documents Backup"
+      },
+      {
+        "name": "Projects",
+        "sourcePath": "C:\\Users\\YourName\\Projects",
+        "backupFolderName": "Projects Backup"
+      }
+    ]
+  }
+}
+```
+
+### Multiple Source Features
+
+- **Independent Processing**: Each source is processed separately with its own change detection
+- **Separate Snapshots**: File snapshots are maintained separately for each source
+- **Individual Statistics**: Backup statistics are tracked per source
+- **Organized Storage**: Each source gets its own folder in Google Drive
+
+### Multiple Source Usage
+
+All existing commands work the same way:
+
+```bash
+# Backup all configured sources
+npm run backup
+
+# View status for all sources
+npm run status
+
+# Start scheduled backups for all sources
+npm start
+```
+
+The system will process each source sequentially and provide detailed statistics for each one in the logs and email notifications.
 
 ## License
 

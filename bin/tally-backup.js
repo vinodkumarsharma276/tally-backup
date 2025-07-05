@@ -176,3 +176,81 @@ async function createProjectStructure(config) {
 }
 
 program.parse();
+
+// If no command was provided (e.g., double-clicked), show interactive menu
+if (process.argv.length === 2) {
+  showInteractiveMenu();
+}
+
+async function showInteractiveMenu() {
+  console.log('\n' + '='.repeat(60));
+  console.log('    🚀 Tally Backup Pro - Interactive Menu');
+  console.log('='.repeat(60));
+  console.log('\nWelcome! Choose an option:');
+  console.log('\n1. 🔧 Setup Wizard (First time setup)');
+  console.log('2. 🔑 Setup Google Drive Authentication');
+  console.log('3. 📂 Configure Backup Sources');
+  console.log('4. 📧 Setup Email Notifications');
+  console.log('5. ▶️  Run Manual Backup Now');
+  console.log('6. 📊 Check Backup Status');
+  console.log('7. 🔄 Start Backup Scheduler');
+  console.log('8. 🛠️  Install as Windows Service');
+  console.log('9. ❌ Exit');
+  
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  
+  rl.question('\nEnter your choice (1-9): ', async (choice) => {
+    rl.close();
+    
+    switch(choice) {
+      case '1':
+        console.log('\n🔧 Starting Setup Wizard...');
+        const setupWizard = require('../setup-wizard.js');
+        break;
+      case '2':
+        console.log('\n🔑 Setting up Google Drive Authentication...');
+        const setupAuth = require('../setup-auth-enhanced');
+        await setupAuth();
+        break;
+      case '3':
+        console.log('\n📂 Configuring Backup Sources...');
+        const setupSources = require('../setup-sources');
+        await setupSources();
+        break;
+      case '4':
+        console.log('\n📧 Setting up Email Notifications...');
+        const setupEmail = require('../setup-email');
+        await setupEmail();
+        break;
+      case '5':
+        console.log('\n▶️  Running Manual Backup...');
+        const manualBackup = require('../manual-backup');
+        await manualBackup();
+        break;
+      case '6':
+        console.log('\n📊 Checking Backup Status...');
+        require('../status');
+        break;
+      case '7':
+        console.log('\n🔄 Starting Backup Scheduler...');
+        require('../index');
+        break;
+      case '8':
+        console.log('\n🛠️  Installing as Windows Service...');
+        const installService = require('../scripts/install-service');
+        await installService();
+        break;
+      case '9':
+        console.log('\n👋 Goodbye!');
+        process.exit(0);
+        break;
+      default:
+        console.log('\n❌ Invalid choice. Please try again.');
+        setTimeout(() => showInteractiveMenu(), 1000);
+    }
+  });
+}

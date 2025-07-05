@@ -1,6 +1,19 @@
 {
   "backup": {
-    "sourcePath": "C:\\Users\\vinodsharma\\Documents\\Tally",
+    "sources": [
+      {
+        "name": "Tally Data",
+        "operation": "backup",
+        "sourcePath": "C:\\Users\\vinodsharma\\Documents\\Tally",
+        "backupFolderName": "Tally Backup"
+      },
+      {
+        "name": "Customer-Data",
+        "operation": "restore",
+        "sourcePath": "C:\\Users\\vinodsharma\\Documents\\Customer-Data",
+        "backupFolderName": "Customer-Data"
+      }
+    ],
     "schedule": "0 20 * * *",
     "maxRetries": 3,
     "retryDelay": 5000,
@@ -10,7 +23,6 @@
   "googleDrive": {
     "credentialsPath": "./config/credentials.json",
     "tokenPath": "./config/token.json",
-    "backupFolderName": "Tally Backup",
     "maxFileSize": 104857600,
     "uploadTimeout": 300000
   },

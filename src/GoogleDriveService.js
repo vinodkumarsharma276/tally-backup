@@ -8,7 +8,8 @@ class GoogleDriveService {
         this.config = config;
         this.drive = null;
         this.auth = null;
-        this.backupFolderId = null;
+        this.backupFolders = new Map(); // Map of folderName -> folderId
+        this.backupFolderIds = {}; // Object to track folder IDs for link generation
     }
 
     /**
@@ -31,9 +32,6 @@ class GoogleDriveService {
             // Initialize Drive API
             this.drive = google.drive({ version: 'v3', auth: this.auth });
 
-            // Ensure backup folder exists
-            await this.ensureBackupFolder();
-            
             logger.info('Google Drive service initialized successfully');
         } catch (error) {
             logger.error('Failed to initialize Google Drive service:', error);
@@ -129,21 +127,27 @@ class GoogleDriveService {
     /**
      * Ensure backup folder exists in Google Drive
      */
-    async ensureBackupFolder() {
+    async ensureBackupFolder(folderName) {
         try {
+            // Check if folder already exists in cache
+            if (this.backupFolders.has(folderName)) {
+                return this.backupFolders.get(folderName);
+            }
+
             // Search for existing backup folder
             const response = await this.drive.files.list({
-                q: `name='${this.config.backupFolderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+                q: `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
                 fields: 'files(id, name)'
             });
 
+            let folderId;
             if (response.data.files.length > 0) {
-                this.backupFolderId = response.data.files[0].id;
-                logger.info(`Using existing backup folder: ${this.config.backupFolderName} (${this.backupFolderId})`);
+                folderId = response.data.files[0].id;
+                logger.info(`Using existing backup folder: ${folderName} (${folderId})`);
             } else {
                 // Create new backup folder
                 const folderMetadata = {
-                    name: this.config.backupFolderName,
+                    name: folderName,
                     mimeType: 'application/vnd.google-apps.folder'
                 };
 
@@ -152,11 +156,16 @@ class GoogleDriveService {
                     fields: 'id'
                 });
 
-                this.backupFolderId = folder.data.id;
-                logger.info(`Created new backup folder: ${this.config.backupFolderName} (${this.backupFolderId})`);
+                folderId = folder.data.id;
+                logger.info(`Created new backup folder: ${folderName} (${folderId})`);
             }
+
+            // Cache the folder ID
+            this.backupFolders.set(folderName, folderId);
+            this.backupFolderIds[folderName] = folderId; // For link generation
+            return folderId;
         } catch (error) {
-            logger.error('Failed to ensure backup folder:', error);
+            logger.error(`Failed to ensure backup folder '${folderName}':`, error);
             throw error;
         }
     }
@@ -345,9 +354,9 @@ class GoogleDriveService {
     /**
      * Upload individual file to mirror folder maintaining folder structure
      */
-    async uploadFileToMirror(localFilePath, relativePath) {
+    async uploadFileToMirror(localFilePath, relativePath, backupFolderId) {
         try {
-            const targetFolderId = await this.ensureFolderStructure(path.dirname(relativePath));
+            const targetFolderId = await this.ensureFolderStructure(path.dirname(relativePath), backupFolderId);
             const fileName = path.basename(relativePath);
             
             // Check if file already exists
@@ -394,12 +403,12 @@ class GoogleDriveService {
     /**
      * Delete file from mirror
      */
-    async deleteFileFromMirror(relativePath) {
+    async deleteFileFromMirror(relativePath, backupFolderId) {
         try {
             const folderPath = path.dirname(relativePath);
             const fileName = path.basename(relativePath);
             
-            const folderId = await this.findFolderByPath(folderPath);
+            const folderId = await this.findFolderByPath(folderPath, backupFolderId);
             if (!folderId) {
                 logger.warn(`Folder not found for deletion: ${folderPath}`);
                 return;
@@ -421,14 +430,14 @@ class GoogleDriveService {
     /**
      * Ensure folder structure exists in Google Drive
      */
-    async ensureFolderStructure(relativeFolderPath) {
+    async ensureFolderStructure(relativeFolderPath, rootFolderId) {
         try {
             if (!relativeFolderPath || relativeFolderPath === '.' || relativeFolderPath === '') {
-                return this.backupFolderId;
+                return rootFolderId;
             }
 
             const pathParts = relativeFolderPath.split(path.sep).filter(part => part);
-            let currentFolderId = this.backupFolderId;
+            let currentFolderId = rootFolderId;
 
             for (const folderName of pathParts) {
                 const existingFolder = await this.findFileInFolder(folderName, currentFolderId, 'application/vnd.google-apps.folder');
@@ -497,14 +506,14 @@ class GoogleDriveService {
     /**
      * Find folder by relative path
      */
-    async findFolderByPath(relativePath) {
+    async findFolderByPath(relativePath, rootFolderId) {
         try {
             if (!relativePath || relativePath === '.' || relativePath === '') {
-                return this.backupFolderId;
+                return rootFolderId;
             }
 
             const pathParts = relativePath.split(path.sep).filter(part => part);
-            let currentFolderId = this.backupFolderId;
+            let currentFolderId = rootFolderId;
 
             for (const folderName of pathParts) {
                 const folder = await this.findFileInFolder(folderName, currentFolderId, 'application/vnd.google-apps.folder');
@@ -666,13 +675,29 @@ class GoogleDriveService {
     async ensureSystemFolder() {
         try {
             const systemFolderName = '.tally-backup-system';
-            const existingFolder = await this.findFileInFolder(systemFolderName, this.backupFolderId, 'application/vnd.google-apps.folder');
             
-            if (existingFolder) {
-                return existingFolder.id;
+            // Search for system folder at root level
+            const response = await this.drive.files.list({
+                q: `name='${systemFolderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+                fields: 'files(id, name)'
+            });
+            
+            if (response.data.files.length > 0) {
+                return response.data.files[0].id;
             } else {
-                const newFolder = await this.createFolderInParent(systemFolderName, this.backupFolderId);
-                return newFolder.id;
+                // Create new system folder at root level
+                const folderMetadata = {
+                    name: systemFolderName,
+                    mimeType: 'application/vnd.google-apps.folder'
+                };
+
+                const folder = await this.drive.files.create({
+                    resource: folderMetadata,
+                    fields: 'id'
+                });
+
+                logger.info(`Created system folder: ${systemFolderName} (${folder.data.id})`);
+                return folder.data.id;
             }
         } catch (error) {
             logger.error('Failed to ensure system folder:', error);
