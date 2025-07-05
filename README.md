@@ -14,6 +14,9 @@ An automated backup solution for Tally software data to Google Drive with increm
 - 📊 **Comprehensive Logging**: Detailed logging with Winston for monitoring and debugging
 - 🛡️ **Error Handling**: Robust error handling with retry mechanisms
 - 📈 **Statistics Tracking**: Detailed backup statistics and health monitoring
+- 🔒 **Snapshot Redundancy**: Backup state stored both locally and in Google Drive
+- 🚀 **Disaster Recovery**: Complete system recovery even if local files are lost
+- 📧 **Email Notifications**: Automatic email reports for backup success/failure with Google Drive links
 
 ## Prerequisites
 
@@ -25,6 +28,7 @@ An automated backup solution for Tally software data to Google Drive with increm
 
 1. Clone or download this repository
 2. Install dependencies:
+
    ```bash
    npm install
    ```
@@ -43,11 +47,13 @@ An automated backup solution for Tally software data to Google Drive with increm
 ### 2. Authentication
 
 Run the authentication setup:
+
 ```bash
 npm run setup-auth
 ```
 
 Follow the instructions to:
+
 1. Visit the provided URL
 2. Grant necessary permissions
 3. Copy the authorization code
@@ -76,9 +82,42 @@ Edit `config/config.json` to customize settings:
     "keepDailyBackups": 30,
     "keepWeeklyBackups": 12,
     "keepMonthlyBackups": 12
+  },
+  "email": {
+    "enabled": false,
+    "smtp": {
+      "host": "smtp.gmail.com",
+      "port": 587,
+      "secure": false,
+      "auth": {
+        "user": "your-email@gmail.com",
+        "pass": "your-app-password"
+      }
+    },
+    "from": "your-email@gmail.com",
+    "to": "recipient@gmail.com",
+    "subject": "Tally Backup Report",
+    "sendOnSuccess": true,
+    "sendOnFailure": true,
+    "includeStats": true,
+    "includeDriveLink": true
   }
 }
 ```
+
+### 4. Email Notifications (Optional)
+
+Configure email notifications to receive backup reports:
+
+```bash
+npm run setup-email
+```
+
+**For Gmail users:**
+
+1. Enable 2-factor authentication on your Google account
+2. Generate an "App Password" for Tally Backup Pro
+3. Use the App Password instead of your regular Gmail password
 
 ## Usage
 
@@ -106,22 +145,57 @@ npm run status
 
 View detailed backup statistics, health status, and system information.
 
+### Test Email Notifications
+
+```bash
+npm run test-email
+```
+
+Send a test email to verify your email configuration is working correctly.
+
 ## How It Works
 
-### Initial Backup
-1. Scans the entire Tally data directory
-2. Creates compressed archives (chunks) of the data
-3. Uploads to Google Drive in organized folders
-4. Creates file snapshots and deduplication index
+### Mirror Backup Approach
 
-### Incremental Backups
+The system maintains a **single folder mirror** of your Tally data in Google Drive, preserving the exact folder structure and file organization.
+
+### Initial Backup
+
+1. Scans the entire Tally data directory
+2. Uploads all files individually to Google Drive
+3. Preserves original folder structure in "Tally Backup" folder
+4. Creates file snapshots and deduplication index for future comparisons
+
+### Incremental Backups (Mirror Synchronization)
+
 1. Scans source directory for changes
-2. Compares with previous file snapshot using checksums
-3. Identifies added, modified, and deleted files
-4. Only backs up changed files, reducing time and storage
+2. Compares with previous file snapshot using checksums and timestamps
+3. Identifies three types of changes:
+   - **Added files**: New files that didn't exist before
+   - **Modified files**: Files that have changed since last backup
+   - **Deleted files**: Files that were removed from local directory
+4. Synchronizes the Google Drive mirror:
+   - **Uploads** new and modified files
+   - **Deletes** files that were removed locally
+   - **Preserves** unchanged files
 5. Updates file snapshots and deduplication data
+6. **Backs up system files** (snapshots, state) to Google Drive for redundancy
+
+### Snapshot Backup & Recovery
+
+- **Local + Cloud Storage**: File snapshots are stored both locally and in Google Drive
+- **Automatic Restore**: If local snapshots are lost, they're automatically restored from Google Drive
+- **System Folder**: Metadata is stored in a hidden `.tally-backup-system` folder in Google Drive
+- **Disaster Recovery**: Complete system recovery possible even if local files are lost
+
+### File Deletion Handling
+
+- **True Mirror Sync**: When you delete files from your local Tally folder, they are automatically deleted from Google Drive
+- **Maintains Consistency**: The Google Drive backup always reflects your current local folder state
+- **Safe Operation**: Only removes files that are confirmed to be deleted locally
 
 ### Deduplication
+
 - Uses SHA256 hashing to identify duplicate content
 - Tracks file blocks to avoid storing identical data multiple times
 - Provides significant space savings for repetitive data
@@ -129,7 +203,7 @@ View detailed backup statistics, health status, and system information.
 
 ## File Structure
 
-```
+```text
 tally-backup/
 ├── config/
 │   ├── config.json          # Main configuration

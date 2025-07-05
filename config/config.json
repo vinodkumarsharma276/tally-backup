@@ -28,5 +28,24 @@
     "level": "info",
     "maxFiles": 10,
     "maxSize": "10m"
+  },
+  "email": {
+    "enabled": true,
+    "smtp": {
+      "host": "smtp.gmail.com",
+      "port": 587,
+      "secure": false,
+      "auth": {
+        "user": "vinodkhoraa@gmail.com",
+        "pass": "qinj mbpx vlrz ians"
+      }
+    },
+    "from": "vinodkhoraa@gmail.com",
+    "to": "vinodkhoraa@gmail.com",
+    "subject": "Tally Backup Report",
+    "sendOnSuccess": true,
+    "sendOnFailure": true,
+    "includeStats": true,
+    "includeDriveLink": true
   }
 }

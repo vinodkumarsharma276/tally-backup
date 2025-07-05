@@ -14,6 +14,8 @@
     "setup-auth": "node setup-auth.js",
     "setup-auth-auto": "node setup-auth-enhanced.js",
     "setup-wizard": "node setup-wizard.js",
+    "setup-email": "node setup-email.js",
+    "test-email": "node test-email.js",
     "install-service": "node scripts/install-service.js",
     "install-windows-service": "node scripts/install-windows-service-pro.js",
     "install-linux-service": "node scripts/install-linux-service-pro.js",
@@ -69,7 +71,7 @@
     "commander": "^12.1.0",
     "inquirer": "^9.2.23",
     "node-windows": "^1.0.0-beta.8",
-    "node-linux": "^0.1.12"
+    "nodemailer": "^6.9.15"
   },
   "devDependencies": {
     "pkg": "^5.8.1"

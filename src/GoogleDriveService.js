@@ -567,6 +567,118 @@ class GoogleDriveService {
             throw error;
         }
     }
+
+    /**
+     * Backup snapshot files to Google Drive
+     * @param {string} snapshotFilePath - Path to local snapshot file
+     * @param {string} fileName - Name for the backup file
+     */
+    async backupSnapshotToGoogleDrive(snapshotFilePath, fileName) {
+        try {
+            if (!await fs.pathExists(snapshotFilePath)) {
+                logger.warn(`Snapshot file not found: ${snapshotFilePath}`);
+                return;
+            }
+
+            // Create a hidden folder for system files
+            const systemFolderId = await this.ensureSystemFolder();
+            
+            // Check if snapshot already exists
+            const existingFile = await this.findFileInFolder(fileName, systemFolderId);
+            
+            const fileMetadata = {
+                name: fileName,
+                parents: [systemFolderId]
+            };
+
+            const media = {
+                mimeType: 'application/json',
+                body: fs.createReadStream(snapshotFilePath)
+            };
+
+            if (existingFile) {
+                // Update existing snapshot
+                delete fileMetadata.parents;
+                await this.drive.files.update({
+                    fileId: existingFile.id,
+                    resource: fileMetadata,
+                    media: media
+                });
+                logger.info(`Updated snapshot backup: ${fileName}`);
+            } else {
+                // Create new snapshot backup
+                await this.drive.files.create({
+                    resource: fileMetadata,
+                    media: media
+                });
+                logger.info(`Created snapshot backup: ${fileName}`);
+            }
+        } catch (error) {
+            logger.error(`Failed to backup snapshot ${fileName}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Restore snapshot file from Google Drive
+     * @param {string} fileName - Name of the backup file
+     * @param {string} localFilePath - Path to restore the file to
+     */
+    async restoreSnapshotFromGoogleDrive(fileName, localFilePath) {
+        try {
+            const systemFolderId = await this.ensureSystemFolder();
+            const file = await this.findFileInFolder(fileName, systemFolderId);
+            
+            if (!file) {
+                logger.info(`No snapshot backup found: ${fileName}`);
+                return false;
+            }
+
+            // Download the file
+            const response = await this.drive.files.get({
+                fileId: file.id,
+                alt: 'media'
+            });
+
+            // Ensure local directory exists
+            await fs.ensureDir(path.dirname(localFilePath));
+            
+            // Convert response data to string if it's an object (for JSON files)
+            let fileContent = response.data;
+            if (typeof fileContent === 'object') {
+                fileContent = JSON.stringify(fileContent, null, 2);
+            }
+            
+            // Write the file
+            await fs.writeFile(localFilePath, fileContent, 'utf8');
+            logger.info(`Restored snapshot from backup: ${fileName}`);
+            
+            return true;
+        } catch (error) {
+            logger.error(`Failed to restore snapshot ${fileName}:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Ensure system folder exists for storing metadata files
+     */
+    async ensureSystemFolder() {
+        try {
+            const systemFolderName = '.tally-backup-system';
+            const existingFolder = await this.findFileInFolder(systemFolderName, this.backupFolderId, 'application/vnd.google-apps.folder');
+            
+            if (existingFolder) {
+                return existingFolder.id;
+            } else {
+                const newFolder = await this.createFolderInParent(systemFolderName, this.backupFolderId);
+                return newFolder.id;
+            }
+        } catch (error) {
+            logger.error('Failed to ensure system folder:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = GoogleDriveService;

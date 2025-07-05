@@ -5,6 +5,7 @@ const logger = require('./utils/logger');
 const FileUtils = require('./utils/FileUtils');
 const GoogleDriveService = require('./GoogleDriveService');
 const BackupState = require('./BackupState');
+const EmailService = require('./EmailService');
 
 class TallyBackup {
     constructor(config) {
@@ -13,6 +14,7 @@ class TallyBackup {
         this.cronJob = null;
         this.googleDrive = null;
         this.backupState = null;
+        this.emailService = null;
         this.tempDir = path.join(process.cwd(), 'temp', `backup-${Date.now()}`);
     }
 
@@ -23,13 +25,19 @@ class TallyBackup {
         try {
             logger.info('Initializing Tally Backup system...');
 
-            // Initialize backup state
-            this.backupState = new BackupState(path.join(process.cwd(), 'data'));
-            await this.backupState.initialize();
-
-            // Initialize Google Drive service
+            // Initialize Google Drive service first
             this.googleDrive = new GoogleDriveService(this.config.googleDrive);
             await this.googleDrive.initialize();
+
+            // Initialize backup state with Google Drive restore capability
+            this.backupState = new BackupState(path.join(process.cwd(), 'data'));
+            await this.backupState.initializeWithGoogleDriveRestore(this.googleDrive);
+
+            // Initialize email service
+            if (this.config.email) {
+                this.emailService = new EmailService(this.config.email);
+                await this.emailService.initialize();
+            }
 
             // Ensure temp directory exists
             await FileUtils.ensureDirectory(this.tempDir);
@@ -166,8 +174,8 @@ class TallyBackup {
             // Step 6: Update deduplication index
             await this.updateDeduplicationIndex(filesToBackup);
 
-            // Step 7: Save state
-            await this.backupState.saveAll();
+            // Step 7: Save state and backup to Google Drive
+            await this.backupState.saveAllWithGoogleDriveBackup(this.googleDrive);
 
             // Step 8: No cleanup needed for mirror approach
 
@@ -177,14 +185,27 @@ class TallyBackup {
             this.backupState.completeBackup(backupStats);
             logger.logBackupComplete(backupStats);
 
+            // Step 9: Send success email notification
+            if (this.emailService) {
+                const driveLink = await this.getGoogleDriveLink();
+                await this.emailService.sendBackupSuccess(backupStats, driveLink);
+            }
+
         } catch (error) {
             backupStats.duration = Date.now() - startTime;
             this.backupState.failBackup();
             logger.logBackupError(error);
+            
+            // Send failure email notification
+            if (this.emailService) {
+                const driveLink = await this.getGoogleDriveLink();
+                await this.emailService.sendBackupFailure(error, backupStats, driveLink);
+            }
+            
             throw error;
         } finally {
             this.isRunning = false;
-            await this.backupState.saveAll();
+            await this.backupState.saveAllWithGoogleDriveBackup(this.googleDrive);
             await FileUtils.cleanupTempFiles(this.tempDir);
         }
 
@@ -331,6 +352,23 @@ class TallyBackup {
         }
         
         return await this.runBackup();
+    }
+
+    /**
+     * Get Google Drive backup folder link
+     */
+    async getGoogleDriveLink() {
+        try {
+            if (!this.googleDrive || !this.googleDrive.backupFolderId) {
+                return null;
+            }
+
+            // Generate shareable link to the backup folder
+            return `https://drive.google.com/drive/folders/${this.googleDrive.backupFolderId}`;
+        } catch (error) {
+            logger.warn('Failed to generate Google Drive link:', error.message);
+            return null;
+        }
     }
 
     /**
