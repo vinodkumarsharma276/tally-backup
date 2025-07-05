@@ -8,13 +8,63 @@ const archiver = require('archiver');
 /**
  * Build Release Script
  * Creates distribution packages for Windows, Linux, and macOS
+ * 
+ * Usage:
+ *   node build-release.js [environment]
+ *   
+ * Environments:
+ *   windows  - Build Windows package only
+ *   linux    - Build Linux package only
+ *   source   - Build source package only
+ *   docker   - Build Docker package only
+ *   all      - Build all packages (default)
  */
 
 const VERSION = require('../package.json').version;
 const DIST_DIR = path.join(__dirname, '..', 'dist');
 const RELEASE_DIR = path.join(__dirname, '..', 'releases');
 
+// Parse command line arguments
+const args = process.argv.slice(2);
+const targetEnvironment = args[0] || 'all';
+
+const validEnvironments = ['windows', 'linux', 'source', 'docker', 'all'];
+
+// Show help if requested
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(`
+🏗️  Tally Backup Pro - Build Release Script
+
+Usage: node build-release.js [environment] [options]
+
+Environments:
+  windows  - Build Windows package only
+  linux    - Build Linux package only  
+  source   - Build source package only
+  docker   - Build Docker package only
+  all      - Build all packages (default)
+
+Options:
+  -h, --help  Show this help message
+
+Examples:
+  node build-release.js windows
+  npm run build-windows
+  npm run build-linux
+  npm run build-release
+`);
+  process.exit(0);
+}
+
+if (!validEnvironments.includes(targetEnvironment)) {
+  console.error(`❌ Invalid environment: ${targetEnvironment}`);
+  console.log('Valid environments: ' + validEnvironments.join(', '));
+  console.log('Use --help for more information');
+  process.exit(1);
+}
+
 console.log('🏗️  Building Tally Backup Pro v' + VERSION);
+console.log('Target: ' + targetEnvironment);
 console.log('================================');
 
 async function main() {
@@ -25,28 +75,67 @@ async function main() {
     await fs.ensureDir(DIST_DIR);
     await fs.ensureDir(RELEASE_DIR);
 
-    // Build executables
+    // Build executables based on target environment
     console.log('📦 Building standalone executables...');
-    try {
-      // Try using npx first, then fall back to local or global pkg
-      try {
-        execSync('npx pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --output dist/tally-backup', { stdio: 'inherit' });
-      } catch (error) {
-        console.log('Trying global pkg...');
-        execSync('pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --output dist/tally-backup', { stdio: 'inherit' });
-      }
-    } catch (error) {
-      console.error('Failed to build executables:', error.message);
-      console.log('Installing pkg and trying again...');
-      execSync('npm install -g pkg', { stdio: 'inherit' });
-      execSync('pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --output dist/tally-backup', { stdio: 'inherit' });
+    
+    let buildTargets = [];
+    switch (targetEnvironment) {
+      case 'windows':
+        buildTargets = ['node18-win-x64'];
+        break;
+      case 'linux':
+        buildTargets = ['node18-linux-x64'];
+        break;
+      case 'source':
+      case 'docker':
+        // Source and Docker don't need compiled executables
+        break;
+      case 'all':
+      default:
+        buildTargets = ['node18-win-x64', 'node18-linux-x64', 'node18-macos-x64'];
+        break;
     }
 
-    // Create release packages
-    await createWindowsPackage();
-    await createLinuxPackage();
-    await createSourcePackage();
-    await createDockerPackage();
+    if (buildTargets.length > 0) {
+      const targetsStr = buildTargets.join(',');
+      try {
+        // Try using npx first, then fall back to local or global pkg
+        try {
+          execSync(`npx pkg . --targets ${targetsStr} --output dist/tally-backup`, { stdio: 'inherit' });
+        } catch (error) {
+          console.log('Trying global pkg...');
+          execSync(`pkg . --targets ${targetsStr} --output dist/tally-backup`, { stdio: 'inherit' });
+        }
+      } catch (error) {
+        console.error('Failed to build executables:', error.message);
+        console.log('Installing pkg and trying again...');
+        execSync('npm install -g pkg', { stdio: 'inherit' });
+        execSync(`pkg . --targets ${targetsStr} --output dist/tally-backup`, { stdio: 'inherit' });
+      }
+    }
+
+    // Create release packages based on target environment
+    switch (targetEnvironment) {
+      case 'windows':
+        await createWindowsPackage();
+        break;
+      case 'linux':
+        await createLinuxPackage();
+        break;
+      case 'source':
+        await createSourcePackage();
+        break;
+      case 'docker':
+        await createDockerPackage();
+        break;
+      case 'all':
+      default:
+        await createWindowsPackage();
+        await createLinuxPackage();
+        await createSourcePackage();
+        await createDockerPackage();
+        break;
+    }
 
     console.log('\n✅ Release build completed successfully!');
     console.log(`📁 Release packages created in: ${RELEASE_DIR}`);
@@ -64,8 +153,9 @@ async function createWindowsPackage() {
   await fs.ensureDir(winDir);
   
   // Copy executable
+  const executableName = targetEnvironment === 'windows' ? 'tally-backup.exe' : 'tally-backup-win.exe';
   await fs.copy(
-    path.join(DIST_DIR, 'tally-backup-win.exe'),
+    path.join(DIST_DIR, executableName),
     path.join(winDir, 'tally-backup.exe')
   );
   
@@ -81,73 +171,84 @@ async function createWindowsPackage() {
     path.join(winDir, 'windows-config-tool.bat')
   );
 
+  // Copy installer files
+  const installerFiles = [
+    'install.bat',
+    'install-user.bat', 
+    'install-windows.bat',
+    'tally-backup-launcher.bat'
+  ];
+
+  for (const file of installerFiles) {
+    const srcPath = path.join(__dirname, file);
+    const destPath = path.join(winDir, file);
+    if (await fs.pathExists(srcPath)) {
+      await fs.copy(srcPath, destPath);
+      console.log(`  ✓ Copied ${file}`);
+    } else {
+      console.log(`  ⚠️  ${file} not found, skipping`);
+    }
+  }
+
   // Copy Windows user guide
-  await fs.copy(
-    path.join(__dirname, '..', 'docs', 'windows-user-guide.md'),
-    path.join(winDir, 'WINDOWS-USER-GUIDE.md')
-  );
-  
-  // Create Windows installer script
-  const installerScript = `@echo off
-echo Installing Tally Backup Pro v${VERSION}
-echo ================================
-
-REM Create installation directory
-if not exist "%PROGRAMFILES%\\TallyBackupPro" mkdir "%PROGRAMFILES%\\TallyBackupPro"
-
-REM Copy files
-copy "tally-backup.exe" "%PROGRAMFILES%\\TallyBackupPro\\"
-copy "windows-config-tool.bat" "%PROGRAMFILES%\\TallyBackupPro\\"
-xcopy "config" "%PROGRAMFILES%\\TallyBackupPro\\config\\" /E /I
-
-REM Add to PATH
-setx PATH "%PATH%;%PROGRAMFILES%\\TallyBackupPro" /M
-
-REM Create desktop shortcut
-echo Creating desktop shortcuts...
-powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\\Desktop\\Tally Backup Pro.lnk'); $Shortcut.TargetPath = '%PROGRAMFILES%\\TallyBackupPro\\tally-backup.exe'; $Shortcut.Arguments = 'status'; $Shortcut.Save()"
-
-powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\\Desktop\\Tally Backup Config.lnk'); $Shortcut.TargetPath = '%PROGRAMFILES%\\TallyBackupPro\\windows-config-tool.bat'; $Shortcut.Save()"
-
-echo.
-echo Installation completed successfully!
-echo.
-echo To configure Tally Backup Pro:
-echo   1. Run: "%PROGRAMFILES%\\TallyBackupPro\\windows-config-tool.bat"
-echo   2. Or use the desktop shortcut
-echo   3. Follow the setup wizard
-echo.
-pause
-`;
-  
-  await fs.writeFile(path.join(winDir, 'install.bat'), installerScript);
+  const userGuidePath = path.join(__dirname, '..', 'docs', 'windows-user-guide.md');
+  if (await fs.pathExists(userGuidePath)) {
+    await fs.copy(userGuidePath, path.join(winDir, 'WINDOWS-USER-GUIDE.md'));
+  }
   
   // Create README for Windows
   const windowsReadme = `# Tally Backup Pro - Windows Installation
 
-## Quick Start
-1. Run install.bat as Administrator
-2. Open Command Prompt
-3. Run: tally-backup init
-4. Follow the setup wizard
+## Quick Start (Recommended)
+1. Run install.bat
+2. Choose "1. User Installation" (no admin required)
+3. Follow the setup wizard
 
-## Manual Installation
-1. Copy tally-backup.exe to a folder in your PATH
+## Installation Options
+
+### Option 1: User Installation (Recommended)
+- Run install.bat and choose option 1
+- No administrator privileges required
+- Installs for current user only
+- Data stored in user profile
+
+### Option 2: System Installation (Advanced)
+- Run install.bat and choose option 2
+- Requires administrator privileges
+- Installs for all users
+- Data stored in system directories
+
+### Option 3: Manual Installation
+1. Copy tally-backup.exe to desired folder
 2. Copy config folder to the same location
-3. Run: tally-backup init
+3. Run tally-backup.exe to see available commands
+
+## After Installation
+1. Use the desktop shortcut "Tally Backup Config"
+2. Or run: windows-config-tool.bat
+3. Follow the setup wizard for Google Drive setup
 
 ## System Requirements
 - Windows 10 or later
 - Internet connection for Google Drive access
 - Sufficient disk space for Tally data backup
 
-For detailed instructions, visit: https://github.com/your-username/tally-backup-pro
+## Troubleshooting
+- If install.bat fails, try install-user.bat directly
+- For system installation, right-click install-windows.bat and "Run as administrator"
+- Check WINDOWS-USER-GUIDE.md for detailed instructions
+
+For support, visit: https://github.com/your-username/tally-backup-pro
 `;
   
   await fs.writeFile(path.join(winDir, 'README.txt'), windowsReadme);
   
   // Create ZIP package
   await createZipPackage(winDir, `tally-backup-pro-${VERSION}-windows.zip`);
+  
+  // Clean up extracted files after ZIP creation
+  await fs.remove(winDir);
+  console.log(`  🧹 Cleaned up staging directory: windows/`);
 }
 
 async function createLinuxPackage() {
