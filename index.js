@@ -3,13 +3,16 @@
 const path = require('path');
 const TallyBackup = require('./src/TallyBackup');
 const logger = require('./src/utils/logger');
-const config = require('./config/config.json');
+const configPathManager = require('./src/utils/ConfigPathManager');
 
 async function main() {
     try {
         logger.info('='.repeat(60));
         logger.info('Starting Tally Backup Application');
         logger.info('='.repeat(60));
+        
+        // Load configuration using path manager
+        const config = await configPathManager.loadConfig();
         
         const backup = new TallyBackup(config);
         

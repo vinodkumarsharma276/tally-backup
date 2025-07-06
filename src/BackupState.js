@@ -336,33 +336,51 @@ class BackupState {
     }
 
     /**
-     * Initialize backup state with Google Drive restore capability
+     * Initialize backup state with Google Drive restore capability (Cloud-first approach)
      * @param {GoogleDriveService} googleDriveService - Google Drive service instance
      */
     async initializeWithGoogleDriveRestore(googleDriveService) {
         try {
             await fs.ensureDir(this.dataDir);
             
-            // Try to restore snapshots from Google Drive if local files don't exist
-            if (!await fs.pathExists(this.snapshotFile)) {
-                logger.info('Local snapshot not found, trying to restore from Google Drive...');
-                await googleDriveService.restoreSnapshotFromGoogleDrive('file-snapshot.json', this.snapshotFile);
+            // ALWAYS download fresh from Google Drive - never trust local copies
+            logger.info('Downloading fresh backup state from Google Drive...');
+            
+            // Remove any existing local files to ensure we get fresh data
+            const localFiles = [this.snapshotFile, this.dedupeFile, this.stateFile];
+            for (const file of localFiles) {
+                if (await fs.pathExists(file)) {
+                    await fs.remove(file);
+                    logger.debug(`Removed local file: ${path.basename(file)}`);
+                }
             }
             
-            if (!await fs.pathExists(this.dedupeFile)) {
-                logger.info('Local deduplication index not found, trying to restore from Google Drive...');
-                await googleDriveService.restoreSnapshotFromGoogleDrive('deduplication-index.json', this.dedupeFile);
-            }
+            // Always download fresh from Google Drive
+            const snapshotRestored = await googleDriveService.restoreSnapshotFromGoogleDrive('file-snapshot.json', this.snapshotFile);
+            const dedupeRestored = await googleDriveService.restoreSnapshotFromGoogleDrive('deduplication-index.json', this.dedupeFile);
+            const stateRestored = await googleDriveService.restoreSnapshotFromGoogleDrive('backup-state.json', this.stateFile);
             
-            if (!await fs.pathExists(this.stateFile)) {
-                logger.info('Local backup state not found, trying to restore from Google Drive...');
-                await googleDriveService.restoreSnapshotFromGoogleDrive('backup-state.json', this.stateFile);
+            if (!snapshotRestored || !dedupeRestored || !stateRestored) {
+                logger.warn('Some backup state files not found on Google Drive - will perform full backup');
+                logger.info('Initializing fresh backup state for full backup...');
+                
+                // Initialize fresh state for full backup
+                this.state = {
+                    lastBackupTime: null,
+                    lastSuccessfulBackup: null,
+                    totalBackups: 0,
+                    failedBackups: 0,
+                    totalFilesBackedUp: 0,
+                    totalSizeBackedUp: 0
+                };
+                this.fileSnapshots = new Map();
+                this.deduplicationIndex = new Map();
+            } else {
+                // Load the downloaded state files
+                await this.loadState();
+                await this.loadFileSnapshot();
+                await this.loadDeduplicationIndex();
             }
-            
-            // Load all state files
-            await this.loadState();
-            await this.loadFileSnapshot();
-            await this.loadDeduplicationIndex();
             
             logger.info('Backup state initialized with Google Drive restore capability');
         } catch (error) {
@@ -372,12 +390,12 @@ class BackupState {
     }
 
     /**
-     * Save all state files and backup to Google Drive
+     * Save all state files and backup to Google Drive (Cloud-only storage)
      * @param {GoogleDriveService} googleDriveService - Google Drive service instance
      */
     async saveAllWithGoogleDriveBackup(googleDriveService) {
         try {
-            // Save all files locally first
+            // Save all files locally first (temporarily)
             await this.saveAll();
             
             // Backup to Google Drive
@@ -385,7 +403,12 @@ class BackupState {
             await googleDriveService.backupSnapshotToGoogleDrive(this.dedupeFile, 'deduplication-index.json');
             await googleDriveService.backupSnapshotToGoogleDrive(this.stateFile, 'backup-state.json');
             
-            logger.info('All backup state files saved locally and backed up to Google Drive');
+            // Delete local files to ensure cloud-only storage
+            await fs.remove(this.snapshotFile);
+            await fs.remove(this.dedupeFile);
+            await fs.remove(this.stateFile);
+            
+            logger.info('All backup state files saved to Google Drive and local copies removed');
         } catch (error) {
             logger.error('Failed to save backup state with Google Drive backup:', error);
             throw error;

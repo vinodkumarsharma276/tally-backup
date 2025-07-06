@@ -10,25 +10,34 @@ const archiver = require('archiver');
  * Creates distribution packages for Windows, Linux, and macOS
  * 
  * Usage:
- *   node build-release.js [environment]
- *   
+ *   node build-release.js [environment] [options]
+ *
  * Environments:
- *   windows  - Build Windows package only
- *   linux    - Build Linux package only
- *   source   - Build source package only
- *   docker   - Build Docker package only
- *   all      - Build all packages (default)
+ *   windows     - Build Windows package only
+ *   linux       - Build Linux package only
+ *   source      - Build source package only
+ *   docker      - Build Docker package only
+ *   npm         - Build NPM package only
+ *   obfuscated  - Build obfuscated NPM package
+ *   all         - Build all packages (default)
+ * 
+ * Options:
+ *   --obfuscate - Obfuscate source code for security
+ *   --no-npm    - Skip NPM package creation
  */
 
 const VERSION = require('../package.json').version;
 const DIST_DIR = path.join(__dirname, '..', 'dist');
 const RELEASE_DIR = path.join(__dirname, '..', 'releases');
+const OBFUSCATED_DIR = path.join(DIST_DIR, 'obfuscated');
 
 // Parse command line arguments
 const args = process.argv.slice(2);
 const targetEnvironment = args[0] || 'all';
+const shouldObfuscate = args.includes('--obfuscate') || targetEnvironment === 'obfuscated';
+const skipNpm = args.includes('--no-npm');
 
-const validEnvironments = ['windows', 'linux', 'source', 'docker', 'all'];
+const validEnvironments = ['windows', 'linux', 'source', 'docker', 'npm', 'obfuscated', 'all'];
 
 // Show help if requested
 if (args.includes('--help') || args.includes('-h')) {
@@ -38,19 +47,23 @@ if (args.includes('--help') || args.includes('-h')) {
 Usage: node build-release.js [environment] [options]
 
 Environments:
-  windows  - Build Windows package only
-  linux    - Build Linux package only  
-  source   - Build source package only
-  docker   - Build Docker package only
-  all      - Build all packages (default)
+  windows     - Build Windows package only
+  linux       - Build Linux package only  
+  source      - Build source package only
+  docker      - Build Docker package only
+  npm         - Build NPM package only
+  obfuscated  - Build obfuscated NPM package
+  all         - Build all packages (default)
 
 Options:
-  -h, --help  Show this help message
+  --obfuscate  - Obfuscate source code for security
+  --no-npm     - Skip NPM package creation
+  -h, --help   - Show this help message
 
 Examples:
-  node build-release.js windows
-  npm run build-windows
-  npm run build-linux
+  node build-release.js npm
+  node build-release.js obfuscated
+  node build-release.js windows --obfuscate
   npm run build-release
 `);
   process.exit(0);
@@ -65,6 +78,7 @@ if (!validEnvironments.includes(targetEnvironment)) {
 
 console.log('🏗️  Building Tally Backup Pro v' + VERSION);
 console.log('Target: ' + targetEnvironment);
+if (shouldObfuscate) console.log('🔒 Obfuscation: ENABLED');
 console.log('================================');
 
 async function main() {
@@ -75,43 +89,17 @@ async function main() {
     await fs.ensureDir(DIST_DIR);
     await fs.ensureDir(RELEASE_DIR);
 
-    // Build executables based on target environment
-    console.log('📦 Building standalone executables...');
+    // Build and package for Node.js distribution
+    console.log('📦 Packaging Node.js application...');
     
-    let buildTargets = [];
-    switch (targetEnvironment) {
-      case 'windows':
-        buildTargets = ['node18-win-x64'];
-        break;
-      case 'linux':
-        buildTargets = ['node18-linux-x64'];
-        break;
-      case 'source':
-      case 'docker':
-        // Source and Docker don't need compiled executables
-        break;
-      case 'all':
-      default:
-        buildTargets = ['node18-win-x64', 'node18-linux-x64', 'node18-macos-x64'];
-        break;
+    // Create NPM package
+    if ((targetEnvironment === 'all' || targetEnvironment === 'source' || targetEnvironment === 'npm') && !skipNpm) {
+      await createNpmPackage();
     }
 
-    if (buildTargets.length > 0) {
-      const targetsStr = buildTargets.join(',');
-      try {
-        // Try using npx first, then fall back to local or global pkg
-        try {
-          execSync(`npx pkg . --targets ${targetsStr} --output dist/tally-backup`, { stdio: 'inherit' });
-        } catch (error) {
-          console.log('Trying global pkg...');
-          execSync(`pkg . --targets ${targetsStr} --output dist/tally-backup`, { stdio: 'inherit' });
-        }
-      } catch (error) {
-        console.error('Failed to build executables:', error.message);
-        console.log('Installing pkg and trying again...');
-        execSync('npm install -g pkg', { stdio: 'inherit' });
-        execSync(`pkg . --targets ${targetsStr} --output dist/tally-backup`, { stdio: 'inherit' });
-      }
+    // Create obfuscated package
+    if (targetEnvironment === 'obfuscated' || shouldObfuscate) {
+      await createObfuscatedPackage();
     }
 
     // Create release packages based on target environment
@@ -127,6 +115,12 @@ async function main() {
         break;
       case 'docker':
         await createDockerPackage();
+        break;
+      case 'npm':
+        // Already handled above
+        break;
+      case 'obfuscated':
+        // Already handled above
         break;
       case 'all':
       default:
@@ -146,24 +140,344 @@ async function main() {
   }
 }
 
+async function createNpmPackage() {
+  console.log('📦 Creating NPM package...');
+  
+  try {
+    // Create NPM package
+    const result = execSync('npm pack', { encoding: 'utf8' });
+    const packageFile = result.trim();
+    
+    // Move to releases directory
+    const srcPath = path.join(__dirname, '..', packageFile);
+    const destPath = path.join(RELEASE_DIR, packageFile);
+    
+    if (await fs.pathExists(srcPath)) {
+      await fs.move(srcPath, destPath);
+      console.log(`  ✅ NPM package created: ${packageFile}`);
+      
+      // Create installation guide
+      await createInstallationGuide(packageFile);
+    } else {
+      console.error('  ❌ NPM package file not found');
+    }
+    
+  } catch (error) {
+    console.error('Failed to create NPM package:', error.message);
+    throw error;
+  }
+}
+
+async function createObfuscatedPackage() {
+  console.log('🔒 Creating obfuscated package...');
+  
+  try {
+    // Check if obfuscator is available
+    try {
+      execSync('npx javascript-obfuscator --version', { stdio: 'ignore' });
+    } catch (error) {
+      console.log('  📥 Installing javascript-obfuscator...');
+      execSync('npm install javascript-obfuscator --save-dev', { stdio: 'inherit' });
+    }
+    
+    // Create obfuscated directory
+    await fs.ensureDir(OBFUSCATED_DIR);
+    
+    // Copy specific files and directories (not the entire project)
+    const projectRoot = path.join(__dirname, '..');
+    const itemsToCopy = [
+      'src',
+      'config',
+      'scripts',
+      'bin',
+      'docs',
+      'data',
+      'index.js',
+      'manual-backup.js',
+      'restore.js',
+      'status.js',
+      'setup-wizard.js',
+      'setup-auth.js',
+      'setup-auth-enhanced.js',
+      'setup-email.js',
+      'setup-sources.js',
+      'test-email.js',
+      'test-gdrive.js',
+      'test-gdrive-contents.js',
+      'test-missing-folder.js',
+      'force-clean-backup.js',
+      'package.json',
+      'README.md',
+      'SETUP.md',
+      'docker-compose.yml',
+      'Dockerfile'
+    ];
+    
+    for (const item of itemsToCopy) {
+      const srcPath = path.join(projectRoot, item);
+      const destPath = path.join(OBFUSCATED_DIR, item);
+      
+      if (await fs.pathExists(srcPath)) {
+        await fs.copy(srcPath, destPath);
+        console.log(`  ✓ Copied ${item}`);
+      }
+    }
+    
+    // Obfuscate JavaScript files
+    const jsFiles = [
+      'index.js',
+      'manual-backup.js',
+      'restore.js',
+      'status.js',
+      'setup-wizard.js',
+      'setup-auth.js',
+      'setup-auth-enhanced.js',
+      'setup-email.js',
+      'setup-sources.js',
+      'test-email.js',
+      'test-gdrive.js',
+      'test-gdrive-contents.js',
+      'test-missing-folder.js',
+      'force-clean-backup.js',
+      'bin/tally-backup.js'
+    ];
+    
+    // Obfuscate src directory files
+    const srcFiles = await getAllJsFiles(path.join(OBFUSCATED_DIR, 'src'));
+    const scriptFiles = await getAllJsFiles(path.join(OBFUSCATED_DIR, 'scripts'));
+    
+    const allFiles = [...jsFiles.map(f => path.join(OBFUSCATED_DIR, f)), ...srcFiles, ...scriptFiles];
+    
+    for (const file of allFiles) {
+      if (await fs.pathExists(file)) {
+        console.log(`  🔒 Obfuscating ${path.relative(OBFUSCATED_DIR, file)}`);
+        try {
+          const obfuscateCmd = `npx javascript-obfuscator "${file}" --output "${file}" --compact true --control-flow-flattening true --dead-code-injection true --string-array true --string-array-shuffle true --string-array-threshold 0.8 --transform-object-keys true --unicode-escape-sequence true`;
+          execSync(obfuscateCmd, { stdio: 'pipe' });
+        } catch (error) {
+          console.warn(`  ⚠️  Could not obfuscate ${file}: ${error.message}`);
+        }
+      }
+    }
+    
+    // Create NPM package from obfuscated code
+    const originalDir = process.cwd();
+    process.chdir(OBFUSCATED_DIR);
+    
+    try {
+      const result = execSync('npm pack', { encoding: 'utf8' });
+      const packageFile = result.trim();
+      
+      // Move to releases directory with obfuscated prefix
+      const obfuscatedName = packageFile.replace('.tgz', '-obfuscated.tgz');
+      const destPath = path.join(RELEASE_DIR, obfuscatedName);
+      
+      await fs.move(path.join(OBFUSCATED_DIR, packageFile), destPath);
+      console.log(`  ✅ Obfuscated package created: ${obfuscatedName}`);
+      
+      // Create installation guide for obfuscated package
+      await createInstallationGuide(obfuscatedName, true);
+      
+    } finally {
+      process.chdir(originalDir);
+    }
+    
+  } catch (error) {
+    console.error('Failed to create obfuscated package:', error.message);
+    throw error;
+  }
+}
+
+async function getAllJsFiles(dir) {
+  const files = [];
+  
+  if (!(await fs.pathExists(dir))) {
+    return files;
+  }
+  
+  const items = await fs.readdir(dir, { withFileTypes: true });
+  
+  for (const item of items) {
+    const fullPath = path.join(dir, item.name);
+    
+    if (item.isDirectory()) {
+      const subFiles = await getAllJsFiles(fullPath);
+      files.push(...subFiles);
+    } else if (item.isFile() && item.name.endsWith('.js')) {
+      files.push(fullPath);
+    }
+  }
+  
+  return files;
+}
+
+async function createInstallationGuide(packageFile, isObfuscated = false) {
+  const guideName = isObfuscated ? 'INSTALLATION-GUIDE-OBFUSCATED.md' : 'INSTALLATION-GUIDE.md';
+  const guidePath = path.join(RELEASE_DIR, guideName);
+  
+  const guide = `# Tally Backup Pro Installation Guide${isObfuscated ? ' (Obfuscated)' : ''}
+
+## Quick Installation
+
+### Prerequisites
+- Node.js 14.0.0 or higher
+- npm package manager
+- Internet connection
+
+### Installation Steps
+
+1. **Install globally**:
+   \`\`\`bash
+   npm install -g ./${packageFile}
+   \`\`\`
+
+2. **Run setup wizard**:
+   \`\`\`bash
+   tally-backup setup
+   \`\`\`
+
+3. **Start backup service**:
+   \`\`\`bash
+   tally-backup start
+   \`\`\`
+
+## Alternative Installation Methods
+
+### Local Installation
+\`\`\`bash
+# Extract and install locally
+tar -xzf ${packageFile}
+cd package
+npm install
+node setup-wizard.js
+\`\`\`
+
+### Manual Installation
+\`\`\`bash
+# Extract to desired location
+mkdir tally-backup-pro
+tar -xzf ${packageFile} -C tally-backup-pro --strip-components=1
+cd tally-backup-pro
+npm install
+\`\`\`
+
+## Configuration
+
+### 1. Setup Google Drive Authentication
+Run the setup wizard to configure Google Drive access:
+\`\`\`bash
+tally-backup setup-auth
+\`\`\`
+
+### 2. Configure Backup Sources
+Add your Tally data directories:
+\`\`\`bash
+tally-backup setup-sources
+\`\`\`
+
+### 3. Setup Email Notifications (Optional)
+Configure email alerts:
+\`\`\`bash
+tally-backup setup-email
+\`\`\`
+
+## Usage
+
+### Manual Backup
+\`\`\`bash
+tally-backup backup
+\`\`\`
+
+### Check Status
+\`\`\`bash
+tally-backup status
+\`\`\`
+
+### Restore Data
+\`\`\`bash
+tally-backup restore
+\`\`\`
+
+### Install as Service
+\`\`\`bash
+tally-backup install-service
+\`\`\`
+
+## Troubleshooting
+
+### Common Issues
+1. **Permission Errors**: Run as administrator (Windows) or use sudo (Linux)
+2. **Node.js Version**: Ensure Node.js 14+ is installed
+3. **Google Drive Access**: Complete OAuth setup properly
+4. **Firewall**: Allow Node.js through firewall
+
+### Support
+- Check logs in the logs/ directory
+- Run \`tally-backup status\` for diagnostics
+- Verify configuration with \`tally-backup test-email\`
+
+## Security Notes${isObfuscated ? ' (Obfuscated Version)' : ''}
+
+${isObfuscated ? 
+`- This is an obfuscated version with enhanced source code protection
+- Source code is heavily scrambled and difficult to reverse engineer
+- All functionality remains the same as the standard version
+- Use this version when source code protection is important` :
+`- Standard NPM package with bundled source code
+- Source code is visible but bundled with dependencies
+- For enhanced security, consider the obfuscated version`}
+- Keep your Google Drive credentials secure
+- Use strong passwords for email configuration
+- Regular updates recommended
+
+## Version Information
+- Package: ${packageFile}
+- Version: ${VERSION}
+- Build Type: ${isObfuscated ? 'Obfuscated' : 'Standard'}
+- Node.js Required: 14.0.0+
+`;
+
+  await fs.writeFile(guidePath, guide);
+  console.log(`  ✅ Installation guide created: ${guideName}`);
+}
+
 async function createWindowsPackage() {
   console.log('🪟 Creating Windows package...');
   
   const winDir = path.join(RELEASE_DIR, 'windows');
   await fs.ensureDir(winDir);
   
-  // Copy executable
-  const executableName = targetEnvironment === 'windows' ? 'tally-backup.exe' : 'tally-backup-win.exe';
-  await fs.copy(
-    path.join(DIST_DIR, executableName),
-    path.join(winDir, 'tally-backup.exe')
-  );
+  // This is a Node.js application package - no standalone executable
+  console.log('  Creating Node.js application package');
   
-  // Copy config templates
-  await fs.copy(
-    path.join(__dirname, '..', 'config'),
-    path.join(winDir, 'config')
-  );
+  // Copy essential directories and files needed for installation
+  const essentialItems = [
+    'config',     // Configuration templates
+    'scripts',    // All scripts including manual-backup.bat
+    'src',        // Source code for Node.js execution
+    'bin',        // CLI tools
+    'manual-backup.js',  // Manual backup script
+    'status.js',         // Status script
+    'test-email.js',     // Email test script
+    'setup-wizard.js',   // Setup wizard
+    'setup-sources.js',  // Source setup
+    'setup-email.js',    // Email setup
+    'restore.js',        // Restore script
+    'package.json',      // Package info
+    'index.js'           // Main entry point
+  ];
+
+  for (const item of essentialItems) {
+    const srcPath = path.join(__dirname, '..', item);
+    const destPath = path.join(winDir, item);
+    
+    if (await fs.pathExists(srcPath)) {
+      await fs.copy(srcPath, destPath);
+      console.log(`  ✓ Copied ${item}`);
+    } else {
+      console.log(`  ⚠️  ${item} not found, skipping`);
+    }
+  }
 
   // Copy Windows configuration tool
   await fs.copy(
@@ -176,7 +490,8 @@ async function createWindowsPackage() {
     'install.bat',
     'install-user.bat', 
     'install-windows.bat',
-    'tally-backup-launcher.bat'
+    'tally-backup-launcher.bat',
+    'windows-installer.bat'
   ];
 
   for (const file of installerFiles) {
@@ -196,32 +511,63 @@ async function createWindowsPackage() {
     await fs.copy(userGuidePath, path.join(winDir, 'WINDOWS-USER-GUIDE.md'));
   }
   
+  // Copy installer README
+  const installerReadmePath = path.join(__dirname, 'INSTALLER-README.md');
+  if (await fs.pathExists(installerReadmePath)) {
+    await fs.copy(installerReadmePath, path.join(winDir, 'INSTALLER-README.md'));
+  }
+  
   // Create README for Windows
   const windowsReadme = `# Tally Backup Pro - Windows Installation
 
-## Quick Start (Recommended)
-1. Run install.bat
-2. Choose "1. User Installation" (no admin required)
-3. Follow the setup wizard
+## 🚀 Quick Start (Recommended)
 
-## Installation Options
+**For most users:**
+1. Run **windows-installer.bat**
+2. Choose "2. User Installation"
+3. Follow the configuration wizard
 
-### Option 1: User Installation (Recommended)
-- Run install.bat and choose option 1
-- No administrator privileges required
-- Installs for current user only
-- Data stored in user profile
+**For servers/multi-user:**
+1. Right-click Command Prompt → "Run as administrator"
+2. Run **windows-installer.bat**
+3. Choose "1. System Installation"
 
-### Option 2: System Installation (Advanced)
-- Run install.bat and choose option 2
-- Requires administrator privileges
-- Installs for all users
-- Data stored in system directories
+## 📦 What's Included
+
+- **Node.js Application** - Professional backup solution (Node.js required)
+- **windows-installer.bat** - Interactive installer with guided setup
+- **windows-config-tool.bat** - Configuration and management tool
+- **INSTALLER-README.md** - Detailed installation guide
+- **WINDOWS-USER-GUIDE.md** - Complete user documentation
+
+## 🎯 Installation Options
+
+| Option | Best For | Requirements | Location |
+|--------|----------|-------------|----------|
+| **User Install** | Personal computers | Node.js + Current user | User profile |
+| **System Install** | Servers, multi-user | Node.js + Administrator | Program Files |
+| **Portable** | Testing, temporary | Node.js | Current folder |
+
+## 🛠️ After Installation
+
+1. **Configure:** Use windows-config-tool.bat
+2. **Setup Google Drive:** Follow the authentication wizard
+3. **Start Backups:** Service runs automatically
+
+## 📖 Need Help?
+
+- **Quick Setup:** INSTALLER-README.md
+- **Complete Guide:** WINDOWS-USER-GUIDE.md
+- **Configuration:** Use windows-config-tool.bat
+
+---
+**Ready? Run windows-installer.bat to get started!**
 
 ### Option 3: Manual Installation
-1. Copy tally-backup.exe to desired folder
-2. Copy config folder to the same location
-3. Run tally-backup.exe to see available commands
+1. Ensure Node.js 18+ is installed on your system
+2. Copy all files to desired folder
+3. Run: npm install (first time only)
+4. Run: node manual-backup.js --help
 
 ## After Installation
 1. Use the desktop shortcut "Tally Backup Config"
@@ -230,12 +576,14 @@ async function createWindowsPackage() {
 
 ## System Requirements
 - Windows 10 or later
+- Node.js 18 or later
 - Internet connection for Google Drive access
 - Sufficient disk space for Tally data backup
 
 ## Troubleshooting
 - If install.bat fails, try install-user.bat directly
 - For system installation, right-click install-windows.bat and "Run as administrator"
+- Make sure Node.js is in your PATH
 - Check WINDOWS-USER-GUIDE.md for detailed instructions
 
 For support, visit: https://github.com/your-username/tally-backup-pro
@@ -257,14 +605,8 @@ async function createLinuxPackage() {
   const linuxDir = path.join(RELEASE_DIR, 'linux');
   await fs.ensureDir(linuxDir);
   
-  // Copy executable
-  await fs.copy(
-    path.join(DIST_DIR, 'tally-backup-linux'),
-    path.join(linuxDir, 'tally-backup')
-  );
-  
-  // Make executable
-  await fs.chmod(path.join(linuxDir, 'tally-backup'), 0o755);
+  // This is a Node.js application package - no standalone executable
+  console.log('  Creating Node.js application package');
   
   // Copy config templates
   await fs.copy(
@@ -289,24 +631,19 @@ else
    mkdir -p "$INSTALL_DIR"
 fi
 
-# Copy executable
-cp tally-backup "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/tally-backup"
+# Copy application files for Node.js execution
+cp -r . "$INSTALL_DIR/"
+echo "Installed Node.js application files"
 
 # Copy config templates
 mkdir -p "$CONFIG_DIR"
 cp -r config/* "$CONFIG_DIR/"
 
-# Add to PATH if not already there
-if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-    echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> ~/.bashrc
-    echo "Added $INSTALL_DIR to PATH in ~/.bashrc"
-fi
-
 echo ""
 echo "Installation completed successfully!"
-echo "Restart your terminal or run: source ~/.bashrc"
-echo "Then run: tally-backup init"
+echo "Make sure Node.js is installed on your system"
+echo "Run: npm install (first time only)"
+echo "Then run: node manual-backup.js --help"
 `;
   
   await fs.writeFile(path.join(linuxDir, 'install.sh'), installerScript);

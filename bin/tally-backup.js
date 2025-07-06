@@ -4,6 +4,7 @@ const { Command } = require('commander');
 const path = require('path');
 const fs = require('fs-extra');
 const pkg = require('../package.json');
+const configPathManager = require('../src/utils/ConfigPathManager');
 
 const program = new Command();
 
@@ -122,57 +123,169 @@ program
     await uninstallService();
   });
 
+program
+  .command('schedule')
+  .description('Schedule automated backups')
+  .option('-t, --time <time>', 'Set backup time (24-hour format, e.g., 21:00)', '21:00')
+  .action(async (options) => {
+    const cron = require('node-cron');
+    const fs = require('fs-extra');
+    
+    console.log('⏰ Setting up scheduled backup...');
+    console.log(`📅 Backup will run daily at ${options.time}`);
+    
+    // Parse time
+    const [hours, minutes] = options.time.split(':').map(Number);
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      console.log('❌ Invalid time format. Please use HH:MM (24-hour format)');
+      return;
+    }
+    
+    const cronExpression = `${minutes} ${hours} * * *`;
+    
+    // Create a scheduler script
+    const schedulerScript = `
+const cron = require('node-cron');
+const { spawn } = require('child_process');
+const path = require('path');
+
+console.log('🚀 Tally Backup Scheduler started');
+console.log('⏰ Backup scheduled for ${options.time} daily');
+
+cron.schedule('${cronExpression}', () => {
+  console.log('\\n🔄 Starting scheduled backup...');
+  
+  const backupProcess = spawn('npx', ['tally-backup', 'backup'], {
+    stdio: 'inherit',
+    shell: true
+  });
+  
+  backupProcess.on('close', (code) => {
+    if (code === 0) {
+      console.log('✅ Scheduled backup completed successfully');
+    } else {
+      console.log('❌ Scheduled backup failed');
+    }
+  });
+});
+
+// Keep the scheduler running
+process.on('SIGINT', () => {
+  console.log('\\n🛑 Tally Backup Scheduler stopped');
+  process.exit(0);
+});
+`;
+    
+    const schedulerPath = path.join(process.cwd(), 'scheduler.js');
+    await fs.writeFile(schedulerPath, schedulerScript);
+    
+    console.log('✅ Scheduler created successfully');
+    console.log('📁 Scheduler file:', schedulerPath);
+    console.log('');
+    console.log('🎯 To start the scheduler:');
+    console.log('   node scheduler.js');
+    console.log('');
+    console.log('💡 To run scheduler in background:');
+    console.log('   node scheduler.js &');
+  });
+
+program
+  .command('test-email')
+  .description('Test email notification settings')
+  .action(async () => {
+    try {
+      const config = await configPathManager.loadConfig();
+      
+      if (!config.email || !config.email.enabled) {
+        console.log('❌ Email notifications are not configured');
+        console.log('💡 Run setup-wizard to configure email settings');
+        return;
+      }
+      
+      const EmailService = require('../src/EmailService');
+      const emailService = new EmailService(config.email);
+      
+      console.log('📧 Testing email configuration...');
+      
+      await emailService.sendTestEmail();
+      
+      console.log('✅ Test email sent successfully');
+      console.log('📮 Check your inbox for the test email');
+      
+    } catch (error) {
+      console.log('❌ Email test failed:', error.message);
+      console.log('💡 Please check your email configuration in config.json');
+    }
+  });
+
 async function createProjectStructure(config) {
-  // Create directories
-  await fs.ensureDir('config');
-  await fs.ensureDir('data');
-  await fs.ensureDir('logs');
-  await fs.ensureDir('temp');
+  // Create directories using ConfigPathManager
+  await configPathManager.ensureDirectories();
 
-  // Create config file
-  const configData = {
-    backup: {
-      sourcePath: config.tallyPath.replace('%USERNAME%', process.env.USERNAME || process.env.USER),
-      schedule: config.schedule,
-      maxRetries: 3,
-      retryDelay: 5000,
-      compressionLevel: 6,
-      chunkSizeMB: 50
-    },
-    googleDrive: {
-      credentialsPath: "./config/credentials.json",
-      tokenPath: "./config/token.json",
-      backupFolderName: "Tally Backup",
-      maxFileSize: 104857600,
-      uploadTimeout: 300000
-    },
-    logging: {
-      level: "info",
-      maxFiles: 10,
-      maxSize: "10MB"
-    }
-  };
+  // Check if config files already exist
+  const configExists = await fs.pathExists(configPathManager.getConfigPath());
+  const credentialsExists = await fs.pathExists(configPathManager.getCredentialsPath());
+  const tokenExists = await fs.pathExists(configPathManager.getTokenPath());
 
-  await fs.writeJson('config/config.json', configData, { spaces: 2 });
+  if (configExists && credentialsExists && tokenExists) {
+    console.log('📁 Project structure already exists');
+    console.log('⚙️  Configuration files found - skipping creation');
+    console.log('🔑 Google Drive credentials already configured');
+    return;
+  }
 
-  // Create credentials example
-  const credentialsExample = {
-    "web": {
-      "client_id": "your-client-id.apps.googleusercontent.com",
-      "project_id": "your-project-id",
-      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-      "token_uri": "https://oauth2.googleapis.com/token",
-      "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-      "client_secret": "your-client-secret",
-      "redirect_uris": ["http://localhost"]
-    }
-  };
+  // Create config file only if it doesn't exist
+  if (!configExists) {
+    const configData = {
+      backup: {
+        sourcePath: config.tallyPath.replace('%USERNAME%', process.env.USERNAME || process.env.USER),
+        schedule: config.schedule,
+        maxRetries: 3,
+        retryDelay: 5000,
+        compressionLevel: 6,
+        chunkSizeMB: 50
+      },
+      googleDrive: {
+        credentialsPath: configPathManager.getCredentialsPath(),
+        tokenPath: configPathManager.getTokenPath(),
+        backupFolderName: "Tally Backup",
+        maxFileSize: 104857600,
+        uploadTimeout: 300000
+      },
+      logging: {
+        level: "info",
+        maxFiles: 10,
+        maxSize: "10MB"
+      }
+    };
 
-  await fs.writeJson('config/credentials.example.json', credentialsExample, { spaces: 2 });
+    await fs.writeJson(configPathManager.getConfigPath(), configData, { spaces: 2 });
+    console.log(`⚙️  Configuration saved to ${configPathManager.getConfigPath()}`);
+  } else {
+    console.log('⚙️  Configuration file already exists - skipping');
+  }
+
+  // Create credentials example only if credentials.json doesn't exist
+  if (!credentialsExists) {
+    const credentialsExample = {
+      "web": {
+        "client_id": "your-client-id.apps.googleusercontent.com",
+        "project_id": "your-project-id",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_secret": "your-client-secret",
+        "redirect_uris": ["http://localhost"]
+      }
+    };
+
+    await fs.writeJson('config/credentials.example.json', credentialsExample, { spaces: 2 });
+    console.log('� Please add your Google credentials to config/credentials.json');
+  } else {
+    console.log('🔑 Google Drive credentials already configured');
+  }
 
   console.log('📁 Project structure created');
-  console.log('⚙️  Configuration saved to config/config.json');
-  console.log('🔑 Please add your Google credentials to config/credentials.json');
 }
 
 program.parse();

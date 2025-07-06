@@ -5,6 +5,7 @@ const fs = require('fs-extra');
 const GoogleDriveService = require('./src/GoogleDriveService');
 const logger = require('./src/utils/logger');
 const readline = require('readline');
+const configPathManager = require('./src/utils/ConfigPathManager');
 
 /**
  * Enhanced restore script for the multi-source mirror backup system
@@ -12,7 +13,7 @@ const readline = require('readline');
  */
 class TallyRestore {
     constructor() {
-        this.config = require('./config/config.json');
+        this.config = null;
         this.googleDrive = null;
         this.backupFolders = new Map(); // Map of folder name to folder ID
     }
@@ -20,6 +21,9 @@ class TallyRestore {
     async initialize() {
         try {
             logger.info('Initializing restore service...');
+            
+            // Load configuration
+            this.config = await configPathManager.loadConfig();
             
             this.googleDrive = new GoogleDriveService(this.config.googleDrive);
             await this.googleDrive.initialize();

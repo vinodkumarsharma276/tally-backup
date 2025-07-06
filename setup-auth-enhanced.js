@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const GoogleDriveService = require('./src/GoogleDriveService');
-const config = require('./config/config.json');
+const configPathManager = require('./src/utils/ConfigPathManager');
 const logger = require('./src/utils/logger');
 const http = require('http');
 const url = require('url');
@@ -17,6 +17,9 @@ const { exec } = require('child_process');
 async function setupAuthenticationWithServer() {
     try {
         const authCode = process.argv[2];
+        
+        // Load configuration
+        const config = await configPathManager.loadConfig();
         
         if (!authCode) {
             logger.info('='.repeat(60));

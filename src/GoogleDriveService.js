@@ -134,13 +134,16 @@ class GoogleDriveService {
                 return this.backupFolders.get(folderName);
             }
 
-            // Search for existing backup folder
-            const response = await this.drive.files.list({
-                q: `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-                fields: 'files(id, name)'
-            });
-
             let folderId;
+
+            // Search for existing backup folder
+            const response = await this.apiCall(
+                () => this.drive.files.list({
+                    q: `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+                    fields: 'files(id, name)'
+                })
+            );
+
             if (response.data.files.length > 0) {
                 folderId = response.data.files[0].id;
                 logger.info(`Using existing backup folder: ${folderName} (${folderId})`);
@@ -151,10 +154,12 @@ class GoogleDriveService {
                     mimeType: 'application/vnd.google-apps.folder'
                 };
 
-                const folder = await this.drive.files.create({
-                    resource: folderMetadata,
-                    fields: 'id'
-                });
+                const folder = await this.apiCall(
+                    () => this.drive.files.create({
+                        resource: folderMetadata,
+                        fields: 'id'
+                    })
+                );
 
                 folderId = folder.data.id;
                 logger.info(`Created new backup folder: ${folderName} (${folderId})`);
@@ -245,7 +250,7 @@ class GoogleDriveService {
      * Create folder in Google Drive
      */
     async createFolder(folderName, parentFolderId = null) {
-        try {
+        return await this.executeWithRetry(async () => {
             const folderMetadata = {
                 name: folderName,
                 mimeType: 'application/vnd.google-apps.folder',
@@ -259,17 +264,14 @@ class GoogleDriveService {
 
             logger.info(`Folder created: ${folderName} (${response.data.id})`);
             return response.data;
-        } catch (error) {
-            logger.error(`Failed to create folder ${folderName}:`, error);
-            throw error;
-        }
+        }, `creating folder ${folderName}`);
     }
 
     /**
      * List files in Google Drive folder
      */
     async listFiles(folderId = null, query = '') {
-        try {
+        return await this.executeWithRetry(async () => {
             const parentId = folderId || this.backupFolderId;
             const q = `'${parentId}' in parents and trashed=false ${query ? `and ${query}` : ''}`;
 
@@ -280,10 +282,7 @@ class GoogleDriveService {
             });
 
             return response.data.files;
-        } catch (error) {
-            logger.error('Failed to list files:', error);
-            throw error;
-        }
+        }, `listing files in folder ${folderId || this.backupFolderId}`);
     }
 
     /**
@@ -703,6 +702,97 @@ class GoogleDriveService {
             logger.error('Failed to ensure system folder:', error);
             throw error;
         }
+    }
+
+    /**
+     * Check if token is expired and handle refresh
+     */
+    async handleTokenExpiry(error) {
+        if (error.message && (error.message.includes('invalid_grant') || error.message.includes('Token has been expired'))) {
+            logger.warn('Authentication token has expired. Requesting new authentication...');
+            
+            // Clear the expired token
+            const tokenPath = path.resolve(this.config.tokenPath);
+            if (await fs.pathExists(tokenPath)) {
+                await fs.remove(tokenPath);
+            }
+            
+            // Request new token
+            await this.getNewToken();
+            return true;
+        }
+        
+        if (error.code === 401 || error.status === 401) {
+            logger.warn('Authentication failed. Token may be expired or invalid.');
+            
+            // Clear the token and request new one
+            const tokenPath = path.resolve(this.config.tokenPath);
+            if (await fs.pathExists(tokenPath)) {
+                await fs.remove(tokenPath);
+            }
+            
+            await this.getNewToken();
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Wrapper for API calls with automatic token refresh
+     */
+    async executeWithRetry(apiCall, context = '') {
+        try {
+            return await apiCall();
+        } catch (error) {
+            logger.error(`API call failed${context ? ` (${context})` : ''}: ${error.message}`);
+            
+            // Check if this is a token expiry error
+            const wasTokenExpired = await this.handleTokenExpiry(error);
+            if (wasTokenExpired) {
+                // Token was expired and we've requested a new one
+                // Don't retry automatically - let the user re-authenticate
+                throw new Error('Authentication token expired. Please run setup-auth.js to re-authenticate.');
+            }
+            
+            // Re-throw other errors
+            throw error;
+        }
+    }
+
+    /**
+     * Wrapper for Google API calls with retry logic
+     */
+    async apiCall(apiFunction, ...args) {
+        let retries = 3;
+        while (retries > 0) {
+            try {
+                return await apiFunction(...args);
+            } catch (error) {
+                const errorMessage = error.message || '';
+                
+                if (errorMessage.includes('getaddrinfo ENOTFOUND') ||
+                    errorMessage.includes('socket hang up') ||
+                    errorMessage.includes('ECONNRESET') ||
+                    errorMessage.includes('ETIMEDOUT')) {
+                    
+                    logger.warn(`API call failed (${retries} retries left): ${errorMessage}`);
+                    retries--;
+                    
+                    if (retries > 0) {
+                        // Exponential backoff
+                        const delay = Math.pow(2, 4 - retries) * 1000;
+                        logger.info(`Retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                }
+                
+                throw error;
+            }
+        }
+        
+        return await apiFunction(...args);
     }
 }
 

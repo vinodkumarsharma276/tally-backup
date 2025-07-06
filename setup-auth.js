@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const GoogleDriveService = require('./src/GoogleDriveService');
-const config = require('./config/config.json');
+const configPathManager = require('./src/utils/ConfigPathManager');
 const logger = require('./src/utils/logger');
 
 /**
@@ -17,6 +17,9 @@ async function setupAuthentication() {
             logger.info('='.repeat(50));
             logger.info('Google Drive Authentication Setup');
             logger.info('='.repeat(50));
+            
+            // Load configuration
+            const config = await configPathManager.loadConfig();
             
             // Initialize Google Drive service to get auth URL
             const driveService = new GoogleDriveService(config.googleDrive);
@@ -46,6 +49,9 @@ async function setupAuthentication() {
 
         // Save the authorization token
         logger.info('Setting up authentication with provided code...');
+        
+        // Load configuration
+        const config = await configPathManager.loadConfig();
         
         const driveService = new GoogleDriveService(config.googleDrive);
         const credentials = await driveService.loadCredentials();

@@ -25,13 +25,15 @@
     "uninstall-service": "node scripts/uninstall-service.js",
     "uninstall-service-pro": "node scripts/uninstall-service-pro.js",
     "installer": "node scripts/installer.js",
-    "build": "pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --output dist/tally-backup",
     "build-release": "node scripts/build-release.js",
-    "build-windows": "node scripts/build-release.js windows",
-    "build-linux": "node scripts/build-release.js linux",
-    "build-source": "node scripts/build-release.js source",
+    "build-package": "node scripts/build-release.js package",
+    "build-obfuscated": "node scripts/build-release.js obfuscated",
+    "build-npm": "node scripts/build-release.js npm",
     "build-docker": "node scripts/build-release.js docker",
     "package": "npm run build-release",
+    "pack-npm": "npm pack",
+    "pack-obfuscated": "npm run build-obfuscated",
+    "publish-npm": "npm publish",
     "test": "echo \"No tests specified\" && exit 1",
     "postinstall": "node scripts/post-install.js"
   },
@@ -65,44 +67,26 @@
   "engines": {
     "node": ">=14.0.0"
   },
-  "os": ["win32", "linux", "darwin"],
+  "os": [
+    "win32",
+    "linux",
+    "darwin"
+  ],
   "dependencies": {
     "archiver": "^7.0.1",
     "chokidar": "^4.0.3",
+    "commander": "^12.1.0",
     "crypto-js": "^4.2.0",
     "fs-extra": "^11.3.0",
     "glob": "^11.0.3",
     "googleapis": "^150.0.1",
-    "node-cron": "^4.1.1",
-    "winston": "^3.17.0",
-    "commander": "^12.1.0",
     "inquirer": "^9.2.23",
+    "node-cron": "^4.1.1",
     "node-windows": "^1.0.0-beta.8",
-    "nodemailer": "^6.9.15"
+    "nodemailer": "^6.9.15",
+    "winston": "^3.17.0"
   },
   "devDependencies": {
-    "pkg": "^5.8.1"
-  },
-  "pkg": {
-    "scripts": [
-      "index.js",
-      "manual-backup.js",
-      "restore.js",
-      "status.js",
-      "setup-auth.js",
-      "setup-auth-enhanced.js",
-      "setup-wizard.js"
-    ],
-    "assets": [
-      "config/**/*",
-      "src/**/*",
-      "scripts/**/*"
-    ],
-    "targets": [
-      "node18-win-x64",
-      "node18-linux-x64",
-      "node18-macos-x64"
-    ],
-    "outputPath": "dist"
+    "javascript-obfuscator": "^4.0.2"
   }
 }

@@ -2,7 +2,7 @@
 
 const TallyBackup = require('./src/TallyBackup');
 const logger = require('./src/utils/logger');
-const config = require('./config/config.json');
+const configPathManager = require('./src/utils/ConfigPathManager');
 
 /**
  * Manual backup script
@@ -14,6 +14,9 @@ async function runManualBackup() {
         logger.info('='.repeat(60));
         logger.info('Starting Manual Tally Backup');
         logger.info('='.repeat(60));
+        
+        // Load configuration using path manager
+        const config = await configPathManager.loadConfig();
         
         const backup = new TallyBackup(config);
         
@@ -38,4 +41,10 @@ async function runManualBackup() {
     }
 }
 
-runManualBackup();
+// Export the function for use by other modules (like CLI)
+module.exports = runManualBackup;
+
+// If running directly (not imported), execute the backup
+if (require.main === module) {
+    runManualBackup();
+}

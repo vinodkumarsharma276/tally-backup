@@ -255,41 +255,53 @@ class TallyBackup {
 
             // Ensure backup folder exists for this source
             const backupFolderId = await this.googleDrive.ensureBackupFolder(sourceConfig.backupFolderName);
+            logger.info(`Using ${backupFolderId ? 'existing' : 'new'} backup folder: ${sourceConfig.backupFolderName} (${backupFolderId})`);
 
             // Step 1: Scan source directory
             const currentFiles = await FileUtils.scanDirectory(sourceConfig.sourcePath);
             backupStats.filesProcessed = currentFiles.length;
 
-            // Step 2: Compare with previous snapshot to find changes
-            const previousFiles = this.backupState.getPreviousFileSnapshot(sourceConfig.name);
-            const changes = FileUtils.compareFileSnapshots(currentFiles, previousFiles);
+            // Step 2: **CRITICAL CHANGE** - Always pull file snapshot from Google Drive first
+            const googleDriveSnapshot = await this.getGoogleDriveSnapshot(sourceConfig.name);
+            
+            // Step 3: Compare current files with Google Drive snapshot (not local snapshot)
+            const changes = FileUtils.compareFileSnapshots(currentFiles, googleDriveSnapshot);
+            
+            logger.info(`File changes detected:`);
+            logger.info(`        - Added: ${changes.added.length}`);
+            logger.info(`        - Modified: ${changes.modified.length}`);
+            logger.info(`        - Deleted: ${changes.deleted.length}`);
+            logger.info(`        - Unchanged: ${changes.unchanged.length}`);
 
-            // Step 3: Process changed files
+            // Step 4: Process changed files
             const filesToBackup = [...changes.added, ...changes.modified];
             const filesToDelete = changes.deleted;
             
             if (filesToBackup.length === 0 && filesToDelete.length === 0) {
                 logger.info(`No files to backup or delete for ${sourceConfig.name}, mirror is up to date`);
+                
+                // Even if no changes, update local snapshot to match Google Drive
+                this.backupState.updateFileSnapshot(currentFiles, sourceConfig.name);
                 backupStats.success = true;
                 return backupStats;
             }
 
-            // Step 4: Sync files to mirror
+            // Step 5: Sync files to mirror
             const syncResult = await this.syncMirrorFolder(filesToBackup, filesToDelete, sourceConfig.sourcePath, backupFolderId);
             backupStats.filesUploaded = syncResult.filesUploaded;
             backupStats.totalSize = syncResult.totalSize;
 
-            // Step 5: Update file snapshot for this source
+            // Step 6: Update file snapshot for this source (both local and Google Drive)
             this.backupState.updateFileSnapshot(currentFiles, sourceConfig.name);
 
-            // Step 6: Update deduplication index
+            // Step 7: Update deduplication index
             await this.updateDeduplicationIndex(filesToBackup);
 
             const endTime = Date.now();
             backupStats.duration = endTime - startTime;
             backupStats.success = true;
 
-            // Step 7: Save state and backup to Google Drive
+            // Step 8: Save state and backup to Google Drive
             await this.backupState.saveAllWithGoogleDriveBackup(this.googleDrive);
 
             logger.info(`Backup for ${sourceConfig.name} completed successfully in ${(backupStats.duration / 1000).toFixed(2)}s`);
@@ -671,6 +683,106 @@ class TallyBackup {
             
         } catch (error) {
             logger.error('Failed to validate restore destinations:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get file snapshot from Google Drive for a specific source
+     * This ensures we always compare against the actual Google Drive state
+     */
+    async getGoogleDriveSnapshot(sourceName) {
+        try {
+            logger.info(`Retrieving Google Drive snapshot for source: ${sourceName}`);
+            
+            // Try to get the latest file-snapshot.json from Google Drive
+            const tempSnapshotPath = path.join(this.tempDir, 'temp-snapshot.json');
+            const snapshotRestored = await this.googleDrive.restoreSnapshotFromGoogleDrive('file-snapshot.json', tempSnapshotPath);
+            
+            if (snapshotRestored && await fs.pathExists(tempSnapshotPath)) {
+                // Parse the Google Drive snapshot
+                const googleDriveSnapshotData = await fs.readJson(tempSnapshotPath);
+                
+                // Clean up temp file
+                await fs.remove(tempSnapshotPath);
+                
+                // Extract snapshot for this specific source
+                if (googleDriveSnapshotData[sourceName]) {
+                    const sourceSnapshot = googleDriveSnapshotData[sourceName];
+                    const snapshotArray = Object.entries(sourceSnapshot).map(([path, data]) => ({
+                        path,
+                        hash: data.hash,
+                        size: data.size,
+                        modifiedTime: data.modifiedTime
+                    }));
+                    
+                    logger.info(`Retrieved Google Drive snapshot for ${sourceName}: ${snapshotArray.length} files`);
+                    return snapshotArray;
+                }
+            }
+            
+            // If no Google Drive snapshot found, return empty array (first backup)
+            logger.info(`No Google Drive snapshot found for ${sourceName}, treating as first backup`);
+            return [];
+            
+        } catch (error) {
+            logger.warn(`Failed to retrieve Google Drive snapshot for ${sourceName}:`, error.message);
+            logger.info(`Falling back to local snapshot for ${sourceName}`);
+            
+            // Fallback to local snapshot if Google Drive fails
+            return this.backupState.getPreviousFileSnapshot(sourceName);
+        }
+    }
+
+    /**
+     * Sync files to mirror folder (upload new/modified files, delete removed files)
+     */
+    async syncMirrorFolder(filesToBackup, filesToDelete, sourcePath, backupFolderId) {
+        let syncStats = {
+            filesUploaded: 0,
+            filesDeleted: 0,
+            totalSize: 0
+        };
+
+        try {
+            // Upload new and modified files
+            for (const file of filesToBackup) {
+                try {
+                    const relativePath = path.relative(sourcePath, file.path);
+                    await this.googleDrive.uploadFileToMirror(file.path, relativePath, backupFolderId);
+                    
+                    syncStats.filesUploaded++;
+                    syncStats.totalSize += file.size;
+                    
+                    if (syncStats.filesUploaded % 10 === 0) {
+                        logger.info(`Uploaded ${syncStats.filesUploaded}/${filesToBackup.length} files...`);
+                    }
+                } catch (error) {
+                    logger.error(`Failed to upload file ${file.path}:`, error);
+                    // Continue with other files instead of failing completely
+                }
+            }
+
+            // Delete files that were removed locally
+            for (const file of filesToDelete) {
+                try {
+                    const relativePath = path.relative(sourcePath, file.path);
+                    await this.googleDrive.deleteFileFromMirror(relativePath, backupFolderId);
+                    
+                    syncStats.filesDeleted++;
+                    
+                    logger.info(`Deleted file from mirror: ${relativePath}`);
+                } catch (error) {
+                    logger.error(`Failed to delete file ${file.path}:`, error);
+                    // Continue with other files instead of failing completely
+                }
+            }
+
+            logger.info(`Sync completed: ${syncStats.filesUploaded} uploaded, ${syncStats.filesDeleted} deleted, ${FileUtils.formatFileSize(syncStats.totalSize)} total`);
+            return syncStats;
+
+        } catch (error) {
+            logger.error('Failed to sync mirror folder:', error);
             throw error;
         }
     }

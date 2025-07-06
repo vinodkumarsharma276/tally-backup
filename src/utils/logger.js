@@ -2,8 +2,11 @@ const winston = require('winston');
 const path = require('path');
 const fs = require('fs-extra');
 
+// Use project root directory for logs
+const baseDir = path.join(__dirname, '..', '..');
+
 // Ensure logs directory exists
-const logsDir = path.join(__dirname, '..', '..', 'logs');
+const logsDir = path.join(baseDir, 'logs');
 fs.ensureDirSync(logsDir);
 
 // Custom format for log messages
