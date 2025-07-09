@@ -2,8 +2,8 @@
 
 const path = require('path');
 const fs = require('fs-extra');
-const BackupState = require('./src/BackupState');
-const logger = require('./src/utils/logger');
+const BackupState = require('../src/BackupState');
+const logger = require('../src/utils/logger');
 
 /**
  * Backup status script

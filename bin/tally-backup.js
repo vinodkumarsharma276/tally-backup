@@ -68,7 +68,7 @@ program
   .command('setup-auth')
   .description('Setup Google Drive authentication')
   .action(async () => {
-    const setupAuth = require('../setup-auth-enhanced');
+    const setupAuth = require('../setup-auth');
     await setupAuth();
   });
 
@@ -76,7 +76,7 @@ program
   .command('backup')
   .description('Run manual backup')
   .action(async () => {
-    const manualBackup = require('../manual-backup');
+    const manualBackup = require('./manual-backup');
     await manualBackup();
   });
 
@@ -84,10 +84,10 @@ program
   .command('restore [output-path]')
   .description('Restore backup to specified directory')
   .action(async (outputPath) => {
-    const restore = require('../restore');
+    const restore = require('./restore');
     const targetPath = outputPath || path.join(process.cwd(), 'restored-tally-data');
     
-    const SimpleRestore = require('../restore');
+    const SimpleRestore = require('./restore');
     const restoreService = new SimpleRestore();
     await restoreService.initialize();
     await restoreService.restoreToDirectory(targetPath);
@@ -97,7 +97,7 @@ program
   .command('status')
   .description('Show backup status and statistics')
   .action(async () => {
-    require('../status');
+    require('./status');
   });
 
 program
@@ -111,7 +111,9 @@ program
   .command('install-service')
   .description('Install as system service')
   .action(async () => {
-    const installService = require('../scripts/install-service');
+    const installService = process.platform === 'win32' 
+      ? require('../scripts/install-windows-service-pro')
+      : require('../scripts/install-linux-service-pro');
     await installService();
   });
 
@@ -119,7 +121,7 @@ program
   .command('uninstall-service')
   .description('Uninstall system service')
   .action(async () => {
-    const uninstallService = require('../scripts/uninstall-service');
+    const uninstallService = require('../scripts/uninstall-service-pro');
     await uninstallService();
   });
 
@@ -326,7 +328,7 @@ async function showInteractiveMenu() {
         break;
       case '2':
         console.log('\n🔑 Setting up Google Drive Authentication...');
-        const setupAuth = require('../setup-auth-enhanced');
+        const setupAuth = require('../setup-auth');
         await setupAuth();
         break;
       case '3':
@@ -341,12 +343,12 @@ async function showInteractiveMenu() {
         break;
       case '5':
         console.log('\n▶️  Running Manual Backup...');
-        const manualBackup = require('../manual-backup');
+        const manualBackup = require('./manual-backup');
         await manualBackup();
         break;
       case '6':
         console.log('\n📊 Checking Backup Status...');
-        require('../status');
+        require('./status');
         break;
       case '7':
         console.log('\n🔄 Starting Backup Scheduler...');
@@ -354,7 +356,9 @@ async function showInteractiveMenu() {
         break;
       case '8':
         console.log('\n🛠️  Installing as Windows Service...');
-        const installService = require('../scripts/install-service');
+        const installService = process.platform === 'win32' 
+          ? require('../scripts/install-windows-service-pro')
+          : require('../scripts/install-linux-service-pro');
         await installService();
         break;
       case '9':

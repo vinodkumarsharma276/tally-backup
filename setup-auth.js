@@ -3,23 +3,28 @@
 const GoogleDriveService = require('./src/GoogleDriveService');
 const configPathManager = require('./src/utils/ConfigPathManager');
 const logger = require('./src/utils/logger');
+const http = require('http');
+const url = require('url');
+const { exec } = require('child_process');
 
 /**
- * Authentication setup script for Google Drive API
- * Usage: node setup-auth.js <authorization_code>
+ * Enhanced authentication setup script for Google Drive API
+ * Usage: 
+ *   node setup-auth-enhanced.js                    # Interactive mode with local server
+ *   node setup-auth-enhanced.js <authorization_code> # Manual code input
  */
 
-async function setupAuthentication() {
+async function setupAuthenticationWithServer() {
     try {
         const authCode = process.argv[2];
         
+        // Load configuration
+        const config = await configPathManager.loadConfig();
+        
         if (!authCode) {
-            logger.info('='.repeat(50));
-            logger.info('Google Drive Authentication Setup');
-            logger.info('='.repeat(50));
-            
-            // Load configuration
-            const config = await configPathManager.loadConfig();
+            logger.info('='.repeat(60));
+            logger.info('Google Drive Authentication Setup (Enhanced)');
+            logger.info('='.repeat(60));
             
             // Initialize Google Drive service to get auth URL
             const driveService = new GoogleDriveService(config.googleDrive);
@@ -27,10 +32,13 @@ async function setupAuthentication() {
             // Load credentials and setup auth
             const credentials = await driveService.loadCredentials();
             const { client_secret, client_id, redirect_uris } = credentials.web || credentials.installed;
+            
+            // Use a local server redirect URI
+            const redirectUri = 'http://localhost:3000/oauth2callback';
             driveService.auth = new (require('googleapis').google.auth.OAuth2)(
                 client_id, 
                 client_secret, 
-                redirect_uris[0]
+                redirectUri
             );
 
             const authUrl = driveService.auth.generateAuthUrl({
@@ -38,20 +46,28 @@ async function setupAuthentication() {
                 scope: ['https://www.googleapis.com/auth/drive.file']
             });
 
-            logger.info('1. Please visit this URL to authorize the application:');
-            logger.info(`   ${authUrl}`);
-            logger.info('2. After authorization, you will receive a code.');
-            logger.info('3. Run this script again with the code:');
-            logger.info('   node setup-auth.js <authorization_code>');
+            logger.info('Starting temporary local server to capture authorization code...');
+            
+            // Create temporary server to capture the code
+            const server = await createTempServer(driveService);
+            
+            logger.info('1. Opening authorization URL in your default browser...');
+            logger.info(`   If it doesn't open automatically, visit: ${authUrl}`);
+            logger.info('2. Complete the authorization in your browser');
+            logger.info('3. The code will be captured automatically');
+            logger.info('');
+            logger.info('Waiting for authorization...');
+            
+            // Open URL in default browser
+            const start = process.platform === 'darwin' ? 'open' : 
+                         process.platform === 'win32' ? 'start' : 'xdg-open';
+            exec(`${start} "${authUrl}"`);
             
             return;
         }
 
-        // Save the authorization token
+        // Manual code input (fallback)
         logger.info('Setting up authentication with provided code...');
-        
-        // Load configuration
-        const config = await configPathManager.loadConfig();
         
         const driveService = new GoogleDriveService(config.googleDrive);
         const credentials = await driveService.loadCredentials();
@@ -90,14 +106,120 @@ async function setupAuthentication() {
             logger.info('');
             logger.info('📖 See OAUTH-TROUBLESHOOTING.md for detailed solutions');
         } else {
-            logger.info('Please make sure:');
-            logger.info('1. You have a valid credentials.json file in the config directory');
-            logger.info('2. The authorization code is correct and not expired');
-            logger.info('3. You have enabled the Google Drive API in Google Cloud Console');
+            logger.info('');
+            logger.info('Manual fallback:');
+            logger.info('1. Visit the authorization URL manually');
+            logger.info('2. Copy the code from the redirected URL');
+            logger.info('3. Run: node setup-auth.js <code>');
         }
         
         process.exit(1);
     }
 }
 
-setupAuthentication();
+/**
+ * Create temporary server to capture OAuth callback
+ */
+function createTempServer(driveService) {
+    return new Promise((resolve, reject) => {
+        const server = http.createServer(async (req, res) => {
+            try {
+                const parsedUrl = url.parse(req.url, true);
+                
+                if (parsedUrl.pathname === '/oauth2callback') {
+                    const { code, error } = parsedUrl.query;
+                    
+                    if (error) {
+                        res.writeHead(400, { 'Content-Type': 'text/html' });
+                        res.end(`
+                            <html>
+                                <body>
+                                    <h1>❌ Authorization Failed</h1>
+                                    <p>Error: ${error}</p>
+                                    <p>Please check the console for more details and try again.</p>
+                                </body>
+                            </html>
+                        `);
+                        server.close();
+                        reject(new Error(`Authorization failed: ${error}`));
+                        return;
+                    }
+                    
+                    if (code) {
+                        logger.info('✅ Authorization code received successfully!');
+                        
+                        try {
+                            await driveService.saveToken(code);
+                            
+                            res.writeHead(200, { 'Content-Type': 'text/html' });
+                            res.end(`
+                                <html>
+                                    <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                                        <h1 style="color: green;">✅ Authentication Successful!</h1>
+                                        <p>Your Tally Backup application has been authorized successfully.</p>
+                                        <p>You can now close this window and return to the terminal.</p>
+                                        <p><strong>Next step:</strong> Run <code>npm start</code> to begin backups.</p>
+                                    </body>
+                                </html>
+                            `);
+                            
+                            server.close();
+                            logger.info('Authentication completed successfully!');
+                            logger.info('You can now run: npm start');
+                            resolve();
+                            
+                        } catch (tokenError) {
+                            res.writeHead(500, { 'Content-Type': 'text/html' });
+                            res.end(`
+                                <html>
+                                    <body>
+                                        <h1>❌ Token Save Failed</h1>
+                                        <p>Error: ${tokenError.message}</p>
+                                        <p>Please check the console for more details.</p>
+                                    </body>
+                                </html>
+                            `);
+                            server.close();
+                            reject(tokenError);
+                        }
+                    }
+                } else {
+                    res.writeHead(404, { 'Content-Type': 'text/plain' });
+                    res.end('Not found');
+                }
+            } catch (serverError) {
+                logger.error('Server error:', serverError);
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Internal server error');
+                server.close();
+                reject(serverError);
+            }
+        });
+
+        server.listen(3000, 'localhost', () => {
+            logger.info('Temporary server started on http://localhost:3000');
+            resolve(server);
+        });
+
+        server.on('error', (err) => {
+            if (err.code === 'EADDRINUSE') {
+                logger.warn('Port 3000 is in use. Please use manual method:');
+                logger.warn('1. Visit the authorization URL');
+                logger.warn('2. Copy the code from the URL after authorization');
+                logger.warn('3. Run: node setup-auth.js <code>');
+                reject(new Error('Port 3000 is already in use'));
+            } else {
+                reject(err);
+            }
+        });
+
+        // Auto-close server after 5 minutes
+        setTimeout(() => {
+            server.close();
+            logger.warn('Authentication timeout. Server closed.');
+            reject(new Error('Authentication timeout'));
+        }, 5 * 60 * 1000);
+    });
+}
+
+setupAuthenticationWithServer();

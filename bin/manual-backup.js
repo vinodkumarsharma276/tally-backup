@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-const TallyBackup = require('./src/TallyBackup');
-const logger = require('./src/utils/logger');
-const configPathManager = require('./src/utils/ConfigPathManager');
+const TallyBackup = require('../src/TallyBackup');
+const logger = require('../src/utils/logger');
+const configPathManager = require('../src/utils/ConfigPathManager');
 
 /**
  * Manual backup script

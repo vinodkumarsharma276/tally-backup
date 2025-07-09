@@ -2,10 +2,10 @@
 
 const path = require('path');
 const fs = require('fs-extra');
-const GoogleDriveService = require('./src/GoogleDriveService');
-const logger = require('./src/utils/logger');
+const GoogleDriveService = require('../src/GoogleDriveService');
+const logger = require('../src/utils/logger');
 const readline = require('readline');
-const configPathManager = require('./src/utils/ConfigPathManager');
+const configPathManager = require('../src/utils/ConfigPathManager');
 
 /**
  * Enhanced restore script for the multi-source mirror backup system

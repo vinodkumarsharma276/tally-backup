@@ -1,12 +1,28 @@
 const winston = require('winston');
+require('winston-daily-rotate-file');
 const path = require('path');
 const fs = require('fs-extra');
 
-// Use project root directory for logs
-const baseDir = path.join(__dirname, '..', '..');
+// Dynamically determine if we're in a package or development environment
+let logsDir;
+try {
+    // Try to use ConfigPathManager for proper path resolution
+    const configManager = require('./ConfigPathManager');
+    logsDir = configManager.getLogsDir();
+    
+    // Ensure directories exist
+    configManager.ensureDirectories();
+    
+    console.log(`Logger initialized with logs directory: ${logsDir}`);
+} catch (error) {
+    console.error('Failed to initialize ConfigPathManager:', error.message);
+    // Fallback to relative path if ConfigPathManager fails
+    const baseDir = path.join(__dirname, '..', '..');
+    logsDir = path.join(baseDir, 'logs');
+    console.log(`Logger falling back to relative path: ${logsDir}`);
+}
 
 // Ensure logs directory exists
-const logsDir = path.join(baseDir, 'logs');
 fs.ensureDirSync(logsDir);
 
 // Custom format for log messages
@@ -24,7 +40,7 @@ const logFormat = winston.format.combine(
     })
 );
 
-// Create logger instance
+// Create logger instance with daily rotation
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
     format: logFormat,
@@ -37,21 +53,27 @@ const logger = winston.createLogger({
             )
         }),
         
-        // File transport for all logs
-        new winston.transports.File({
-            filename: path.join(logsDir, 'tally-backup.log'),
-            maxsize: 10 * 1024 * 1024, // 10MB
-            maxFiles: 10,
-            tailable: true
+        // Daily rotating file transport for all logs
+        new winston.transports.DailyRotateFile({
+            filename: path.join(logsDir, 'tally-backup-%DATE%.log'),
+            datePattern: 'YYYY-MM-DD',
+            zippedArchive: true,
+            maxSize: '20m',
+            maxFiles: '30d', // Keep 30 days of logs
+            createSymlink: true,
+            symlinkName: path.join(logsDir, 'tally-backup-current.log')
         }),
         
-        // Separate file for errors
-        new winston.transports.File({
-            filename: path.join(logsDir, 'error.log'),
+        // Daily rotating file transport for errors only
+        new winston.transports.DailyRotateFile({
+            filename: path.join(logsDir, 'error-%DATE%.log'),
+            datePattern: 'YYYY-MM-DD',
             level: 'error',
-            maxsize: 10 * 1024 * 1024, // 10MB
-            maxFiles: 5,
-            tailable: true
+            zippedArchive: true,
+            maxSize: '20m',
+            maxFiles: '30d', // Keep 30 days of error logs
+            createSymlink: true,
+            symlinkName: path.join(logsDir, 'error-current.log')
         })
     ]
 });

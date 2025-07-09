@@ -22,7 +22,6 @@ logs/
 
 # Build artifacts and distribution packages
 dist/
-releases/
 *.exe
 *.dmg
 *.deb
