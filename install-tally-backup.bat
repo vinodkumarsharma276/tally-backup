@@ -36,7 +36,7 @@ echo.
 
 echo [*] Installing Tally Backup Pro locally...
 cd /d "%INSTALL_DIR%"
-call npm install "%DOWNLOADS_DIR%\tally-backup-pro-1.0.0-obfuscated.tgz"
+call npm install "%DOWNLOADS_DIR%\tally-backup-pro-1.1.0-obfuscated.tgz"
 if %errorlevel% neq 0 (
     echo [ERROR] Installation failed
     echo Please check your internet connection and try again
