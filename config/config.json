@@ -4,7 +4,7 @@
       {
         "name": "Tally Data",
         "operation": "backup",
-        "sourcePath": "C:\\Users\\vinodsharma\\Documents\\Tally",
+        "sourcePath": "C:\\Users\\vinodsharma\\Documents\\TALLY.ERP9",
         "backupFolderName": "Tally Backup"
       },
       {

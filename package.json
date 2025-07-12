@@ -1,6 +1,6 @@
 {
   "name": "tally-backup-pro",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Professional automated backup solution for Tally software data to Google Drive with incremental backup, deduplication, and scheduling capabilities",
   "main": "index.js",
   "bin": {

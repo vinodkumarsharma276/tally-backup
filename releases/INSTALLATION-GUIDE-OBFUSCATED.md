@@ -11,7 +11,7 @@
 
 1. **Install globally**:
    ```bash
-   npm install -g ./tally-backup-pro-1.0.0-obfuscated.tgz
+   npm install -g ./tally-backup-pro-1.1.0-obfuscated.tgz
    ```
 
 2. **Run setup wizard**:
@@ -29,7 +29,7 @@
 ### Local Installation
 ```bash
 # Extract and install locally
-tar -xzf tally-backup-pro-1.0.0-obfuscated.tgz
+tar -xzf tally-backup-pro-1.1.0-obfuscated.tgz
 cd package
 npm install
 node setup-wizard.js
@@ -39,7 +39,7 @@ node setup-wizard.js
 ```bash
 # Extract to desired location
 mkdir tally-backup-pro
-tar -xzf tally-backup-pro-1.0.0-obfuscated.tgz -C tally-backup-pro --strip-components=1
+tar -xzf tally-backup-pro-1.1.0-obfuscated.tgz -C tally-backup-pro --strip-components=1
 cd tally-backup-pro
 npm install
 ```
@@ -110,7 +110,7 @@ tally-backup install-service
 - Regular updates recommended
 
 ## Version Information
-- Package: tally-backup-pro-1.0.0-obfuscated.tgz
-- Version: 1.0.0
+- Package: tally-backup-pro-1.1.0-obfuscated.tgz
+- Version: 1.1.0
 - Build Type: Obfuscated
 - Node.js Required: 14.0.0+

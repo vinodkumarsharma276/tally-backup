@@ -8,36 +8,61 @@ const logger = require('./logger');
 
 class FileUtils {
     /**
-     * Calculate file hash for change detection
+     * Calculate file hash for change detection using streaming for large files
      * @param {string} filePath - Path to the file
      * @param {string} algorithm - Hash algorithm (default: SHA256)
      * @returns {Promise<string>} - File hash
      */
     static async calculateFileHash(filePath, algorithm = 'SHA256') {
-        try {
-            const fileBuffer = await fs.readFile(filePath);
-            
-            if (algorithm === 'SHA256') {
-                return CryptoJS.SHA256(CryptoJS.lib.WordArray.create(fileBuffer)).toString();
-            } else {
+        return new Promise((resolve, reject) => {
+            try {
                 const hash = crypto.createHash(algorithm.toLowerCase());
-                hash.update(fileBuffer);
-                return hash.digest('hex');
+                const stream = fs.createReadStream(filePath);
+                
+                stream.on('data', (data) => {
+                    hash.update(data);
+                });
+                
+                stream.on('end', () => {
+                    resolve(hash.digest('hex'));
+                });
+                
+                stream.on('error', (error) => {
+                    logger.error(`Failed to calculate hash for ${filePath}:`, error);
+                    reject(error);
+                });
+            } catch (error) {
+                logger.error(`Failed to calculate hash for ${filePath}:`, error);
+                reject(error);
             }
-        } catch (error) {
-            logger.error(`Failed to calculate hash for ${filePath}:`, error);
-            throw error;
-        }
+        });
     }
 
     /**
      * Get file statistics including hash and modification time
      * @param {string} filePath - Path to the file
+     * @param {number} maxFileSize - Maximum file size to process (default: 2GB)
      * @returns {Promise<Object>} - File statistics
      */
-    static async getFileStats(filePath) {
+    static async getFileStats(filePath, maxFileSize = 2147483648) { // 2GB default limit
         try {
             const stats = await fs.stat(filePath);
+            
+            // Check if file is too large
+            if (stats.size > maxFileSize) {
+                logger.warn(`File ${filePath} is too large (${stats.size} bytes), skipping hash calculation`);
+                return {
+                    path: filePath,
+                    size: stats.size,
+                    modifiedTime: stats.mtime.getTime(),
+                    hash: `large-file-${stats.size}-${stats.mtime.getTime()}`, // Use size+mtime as identifier
+                    isDirectory: stats.isDirectory(),
+                    isFile: stats.isFile(),
+                    skipped: true,
+                    reason: 'File too large'
+                };
+            }
+            
             const hash = await this.calculateFileHash(filePath);
             
             return {
@@ -49,8 +74,24 @@ class FileUtils {
                 isFile: stats.isFile()
             };
         } catch (error) {
-            logger.error(`Failed to get stats for ${filePath}:`, error);
-            throw error;
+            logger.error(`Failed to get stats for ${filePath}: ${error.message}`);
+            
+            // Return basic stats without hash if file is problematic
+            try {
+                const stats = await fs.stat(filePath);
+                return {
+                    path: filePath,
+                    size: stats.size,
+                    modifiedTime: stats.mtime.getTime(),
+                    hash: `error-file-${stats.size}-${stats.mtime.getTime()}`,
+                    isDirectory: stats.isDirectory(),
+                    isFile: stats.isFile(),
+                    skipped: true,
+                    reason: error.message
+                };
+            } catch (statError) {
+                throw error; // Re-throw if we can't even get basic stats
+            }
         }
     }
 
