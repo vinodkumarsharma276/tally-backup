@@ -24,10 +24,10 @@ echo.
 
 echo [*] Locating installation package...
 set "DOWNLOADS_DIR=%USERPROFILE%\Downloads"
-if exist "%DOWNLOADS_DIR%\tally-backup-pro-1.0.0-obfuscated.tgz" (
+if exist "%DOWNLOADS_DIR%\tally-backup-pro-1.1.0-obfuscated.tgz" (
     echo [OK] Package found in Downloads folder
 ) else (
-    echo [ERROR] tally-backup-pro-1.0.0-obfuscated.tgz not found in Downloads folder
+    echo [ERROR] tally-backup-pro-1.1.0-obfuscated.tgz not found in Downloads folder
     echo Please ensure the package file is in your Downloads folder
     pause
     exit /b 1
