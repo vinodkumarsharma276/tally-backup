@@ -1,5 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
+const { setSecret } = require('./src/utils/SecretStore');
 
 async function setupEmail() {
     console.log('\n🔧 Email Notification Setup');
@@ -69,6 +70,7 @@ async function setupEmail() {
         }
 
         // Update email configuration
+        const passwordRef = await setSecret('config.email.smtp.password', appPassword);
         config.email = {
             enabled: true,
             smtp: {
@@ -77,7 +79,7 @@ async function setupEmail() {
                 secure: false,
                 auth: {
                     user: fromEmail,
-                    pass: appPassword
+                    pass: passwordRef
                 }
             },
             from: fromEmail,
@@ -92,7 +94,7 @@ async function setupEmail() {
         // Save updated config
         await fs.writeJson(configPath, config, { spaces: 2 });
 
-        console.log('\n✅ Email configuration saved successfully!');
+        console.log('\n✅ Email configuration saved successfully with the password in OS secure storage!');
         console.log(`📧 Notifications will be sent to: ${toEmail}`);
         console.log(`📤 From: ${fromEmail}`);
         console.log(`✅ Success notifications: ${config.email.sendOnSuccess ? 'Enabled' : 'Disabled'}`);

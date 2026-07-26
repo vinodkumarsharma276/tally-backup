@@ -1,0 +1,7 @@
+{
+  "_comment": "Rename this file to google-oauth-client.json and fill in the published OAuth client. Create an OAuth client of type 'Desktop app' in Google Cloud Console (APIs & Services > Credentials). Configure the OAuth consent screen with the scope https://www.googleapis.com/auth/drive.file (non-sensitive, so no security assessment is required) and PUBLISH it so any Google user can connect their own account. Desktop clients automatically permit loopback redirects (http://127.0.0.1:<port>), so no redirect URIs need to be registered. This file is bundled into the installer and is git-ignored so real credentials never enter source control.",
+  "installed": {
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "client_secret": "YOUR_CLIENT_SECRET"
+  }
+}

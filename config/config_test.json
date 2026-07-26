@@ -1,0 +1,170 @@
+{
+  "desktop": {
+    "autoStart": true,
+    "minimizeToTray": true,
+    "notifications": true,
+    "schedulerEnabled": true
+  },
+  "storageProfiles": {
+    "test-google-drive": {
+      "type": "google_drive",
+      "rootFolderName": "Tally Backup New",
+      "secretId": "test-google-drive"
+    },
+    "test-local-store": {
+      "type": "local",
+      "rootDir": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\temp\\local-versioned-store",
+      "secretId": "test-local-store"
+    },
+    "test-network-store": {
+      "type": "network",
+      "rootDir": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\temp\\network-versioned-store",
+      "secretId": "test-network-store"
+    },
+    "test-network-unc-example": {
+      "type": "network",
+      "rootDir": "\\\\server\\share\\tally-backup-store",
+      "auth": {
+        "username": "DOMAIN\\username"
+      },
+      "secretId": "test-network-unc-example"
+    },
+    "test-s3-example": {
+      "type": "s3",
+      "bucket": "your-bucket-name",
+      "region": "ap-south-1",
+      "prefix": "tally-backup-store",
+      "endpoint": "https://s3.ap-south-1.amazonaws.com",
+      "forcePathStyle": false,
+      "auth": {},
+      "secretId": "test-s3-example"
+    },
+    "test-s3-env-example": {
+      "type": "s3",
+      "bucket": "your-real-bucket-name",
+      "region": "ap-south-1",
+      "prefix": "tally-backup-store",
+      "endpoint": "https://s3.ap-south-1.amazonaws.com",
+      "forcePathStyle": false,
+      "auth": {},
+      "secretId": "test-s3-env-example"
+    },
+    "test-azure-blob-customer": {
+      "type": "azure_blob",
+      "tenancy": "customer",
+      "accountName": "vetallybackup",
+      "accountUrl": "https://vetallybackup.blob.core.windows.net",
+      "containerName": "tally-backup-test",
+      "prefix": "customer-owned-test",
+      "auth": {
+        "mode": "interactive",
+        "tenantId": "971230f0-fba1-4212-a303-27e13573b25e",
+        "loginHint": "vinodkumarsharma276@gmail.com"
+      },
+      "secretId": "test-azure-blob-customer"
+    },
+    "test-azure-blob-managed": {
+      "type": "azure_blob",
+      "tenancy": "managed",
+      "accountName": "vetallybackup",
+      "accountUrl": "https://vetallybackup.blob.core.windows.net",
+      "containerName": "tally-backup-test",
+      "prefix": "managed-test/tenant-local-dev",
+      "auth": {
+        "mode": "sas"
+      },
+      "secretId": "test-azure-blob-managed"
+    },
+    "primary": {
+      "type": "google_drive",
+      "secretId": "primary",
+      "rootFolderName": "Backup Genie"
+    }
+  },
+  "backup": {
+    "sources": [
+      {
+        "name": "My Data",
+        "enabled": true,
+        "operation": "backup",
+        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\Tally Data Day3",
+        "storageProfile": "primary",
+        "backupFolderName": "Backup Genie"
+      },
+      {
+        "name": "Tally Data",
+        "enabled": true,
+        "operation": "backup",
+        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\Tally Data Day2",
+        "backupFolderName": "Tally Backup New",
+        "storageProfile": "test-google-drive"
+      },
+      {
+        "name": "Restore Latest Tally Data",
+        "enabled": true,
+        "operation": "restore",
+        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\temp\\restore-config-test",
+        "backupFolderName": "Tally Backup New",
+        "storageProfile": "test-google-drive",
+        "restore": {
+          "mode": "scheduled",
+          "schedule": "0 1 * * *",
+          "snapshotId": "latest",
+          "cleanDest": true,
+          "timezone": "Asia/Kolkata"
+        }
+      }
+    ],
+    "schedule": "0 20 * * *",
+    "maxRetries": 3,
+    "retryDelay": 5000,
+    "compressionLevel": 6,
+    "chunkSizeMB": 50,
+    "concurrency": 8
+  },
+  "googleDrive": {
+    "credentialsPath": "secret:config_test.google.oauth.credentials",
+    "tokenPath": "secret:config_test.google.oauth.token",
+    "maxFileSize": 104857600,
+    "uploadTimeout": 300000
+  },
+  "deduplication": {
+    "enabled": true,
+    "hashAlgorithm": "SHA256",
+    "blockSize": 1048576
+  },
+  "retention": {
+    "keepDailyBackups": 30,
+    "keepWeeklyBackups": 12,
+    "keepMonthlyBackups": 12
+  },
+  "logging": {
+    "level": "info",
+    "maxFiles": 10,
+    "maxSize": "10m"
+  },
+  "email": {
+    "enabled": true,
+    "smtp": {
+      "host": "smtp.gmail.com",
+      "port": 587,
+      "secure": false,
+      "auth": {
+        "user": "vinodipdelhi@gmail.com",
+        "pass": "secret:config_test.email.smtp.password"
+      }
+    },
+    "from": "vinodkhoraa@gmail.com",
+    "to": "vinodipdelhi@gmail.com",
+    "subject": "Tally Backup Report",
+    "sendOnSuccess": true,
+    "sendOnFailure": true,
+    "includeStats": true,
+    "includeDriveLink": true,
+    "mode": "company"
+  },
+  "onboarding": {
+    "completed": false,
+    "version": 1
+  }
+}

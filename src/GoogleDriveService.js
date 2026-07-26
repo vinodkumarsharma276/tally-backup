@@ -2,6 +2,14 @@ const { google } = require('googleapis');
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('./utils/logger');
+const {
+    isSecretRef,
+    getSecret,
+    setSecret,
+    deleteSecret,
+    hasSecret
+} = require('./utils/SecretStore');
+const { loadDefaultOAuthClient } = require('./utils/GoogleOAuthClient');
 
 class GoogleDriveService {
     constructor(config) {
@@ -40,22 +48,55 @@ class GoogleDriveService {
     }
 
     /**
-     * Load Google Drive API credentials
+     * Load Google Drive OAuth *client* credentials.
+     *
+     * Order: a customer-provided credentials secret in the OS vault, then a
+     * customer-provided credentials file, then the application's bundled default
+     * OAuth client (so customers do not need their own Google Cloud project).
      */
     async loadCredentials() {
-        const credentialsPath = path.resolve(this.config.credentialsPath);
-        
-        if (!await fs.pathExists(credentialsPath)) {
-            throw new Error(`Credentials file not found: ${credentialsPath}. Please download it from Google Cloud Console.`);
+        if (isSecretRef(this.config.credentialsPath)) {
+            if (await hasSecret(this.config.credentialsPath)) {
+                return JSON.parse(await getSecret(this.config.credentialsPath));
+            }
+        } else if (this.config.credentialsPath) {
+            const credentialsPath = path.resolve(this.config.credentialsPath);
+            if (await fs.pathExists(credentialsPath)) {
+                return await fs.readJson(credentialsPath);
+            }
         }
 
-        return await fs.readJson(credentialsPath);
+        const fallback = loadDefaultOAuthClient();
+        if (fallback) {
+            logger.info(`Using bundled Google OAuth client (${fallback.source === 'env' ? 'environment' : 'application'})`);
+            return {
+                installed: {
+                    client_id: fallback.client_id,
+                    client_secret: fallback.client_secret,
+                    redirect_uris: ['http://127.0.0.1'],
+                },
+            };
+        }
+
+        throw new Error(
+            'No Google credentials available. Use "Connect Google" in the app to sign in, ' +
+            'or provide an OAuth client credentials file.'
+        );
     }
 
     /**
      * Load stored authentication token
      */
     async loadToken() {
+        if (isSecretRef(this.config.tokenPath)) {
+            if (await hasSecret(this.config.tokenPath)) {
+                const token = JSON.parse(await getSecret(this.config.tokenPath));
+                this.auth.setCredentials(token);
+                logger.info('Loaded Google authentication token from secure storage');
+                return;
+            }
+            return this.getNewToken();
+        }
         const tokenPath = path.resolve(this.config.tokenPath);
         
         if (await fs.pathExists(tokenPath)) {
@@ -68,31 +109,15 @@ class GoogleDriveService {
     }
 
     /**
-     * Get new authentication token
+     * Signal that interactive authentication is required. The desktop app runs
+     * the loopback flow in tools/auth.js ("Connect Google"); the CLI uses
+     * `npm run auth-test`.
      */
     async getNewToken() {
-        const authUrl = this.auth.generateAuthUrl({
-            access_type: 'offline',
-            scope: ['https://www.googleapis.com/auth/drive.file']
-        });
-
-        logger.warn(`Authentication required. Please visit this URL and authorize the application:
-        ${authUrl}
-        
-        IMPORTANT: After authorization, you'll be redirected to localhost.
-        The page may show "This site can't be reached" - that's normal!
-        
-        Look at the URL in your browser address bar. It will look like:
-        http://localhost:3000/oauth2callback?code=4/0AY0e-g7...&scope=...
-        
-        Copy the code between 'code=' and '&scope' and run:
-        node setup-auth.js <authorization_code>
-        
-        If you see "App isn't verified" error:
-        1. Click "Advanced" or "Go to Tally Backup Client (unsafe)"
-        2. Or add your email as test user in Google Cloud Console`);
-
-        throw new Error('Authentication required. Please run setup-auth.js first.');
+        throw new Error(
+            'Google account is not connected yet. Open Backup Genie, go to Storage, ' +
+            'and click "Connect Google" to authorise your account.'
+        );
     }
 
     /**
@@ -103,8 +128,13 @@ class GoogleDriveService {
             const { tokens } = await this.auth.getToken(code);
             this.auth.setCredentials(tokens);
             
-            const tokenPath = path.resolve(this.config.tokenPath);
-            await fs.writeJson(tokenPath, tokens);
+            if (isSecretRef(this.config.tokenPath)) {
+                await setSecret(this.config.tokenPath.slice('secret:'.length), JSON.stringify(tokens));
+            } else {
+                const tokenPath = path.resolve(this.config.tokenPath);
+                await fs.ensureDir(path.dirname(tokenPath));
+                await fs.writeJson(tokenPath, tokens);
+            }
             
             logger.info('Authentication token saved successfully');
         } catch (error) {
@@ -712,9 +742,10 @@ class GoogleDriveService {
             logger.warn('Authentication token has expired. Requesting new authentication...');
             
             // Clear the expired token
-            const tokenPath = path.resolve(this.config.tokenPath);
-            if (await fs.pathExists(tokenPath)) {
-                await fs.remove(tokenPath);
+            if (isSecretRef(this.config.tokenPath)) await deleteSecret(this.config.tokenPath);
+            else {
+                const tokenPath = path.resolve(this.config.tokenPath);
+                if (await fs.pathExists(tokenPath)) await fs.remove(tokenPath);
             }
             
             // Request new token
@@ -726,9 +757,10 @@ class GoogleDriveService {
             logger.warn('Authentication failed. Token may be expired or invalid.');
             
             // Clear the token and request new one
-            const tokenPath = path.resolve(this.config.tokenPath);
-            if (await fs.pathExists(tokenPath)) {
-                await fs.remove(tokenPath);
+            if (isSecretRef(this.config.tokenPath)) await deleteSecret(this.config.tokenPath);
+            else {
+                const tokenPath = path.resolve(this.config.tokenPath);
+                if (await fs.pathExists(tokenPath)) await fs.remove(tokenPath);
             }
             
             await this.getNewToken();

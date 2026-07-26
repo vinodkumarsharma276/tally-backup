@@ -1,0 +1,32 @@
+{
+  "name": "ve-tally-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backup Genie managed-storage control plane: tenant auth, short-lived credential vending, metering, quota, billing webhooks and company email relay. Separate deployable — NOT bundled in the desktop app.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
+    "send-test-email": "node tools/send-test-email.js",
+    "test": "node test/e2e.js && node test/billing.test.js && node test/quota.test.js && node test/audit.test.js && node test/mailer.test.js",
+    "test:e2e": "node test/e2e.js",
+    "test:billing": "node test/billing.test.js",
+    "test:quota": "node test/quota.test.js",
+    "test:audit": "node test/audit.test.js",
+    "test:mailer": "node test/mailer.test.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.8.1",
+    "pg": "^8.13.1",
+    "@aws-sdk/client-sts": "^3.700.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "UNLICENSED"
+}

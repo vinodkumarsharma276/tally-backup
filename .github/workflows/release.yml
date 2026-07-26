@@ -1,0 +1,96 @@
+name: Release
+
+# Builds Windows + Linux installers on a version tag and publishes them together
+# in a single GitHub Release. Push a tag like v0.1.1 to trigger it.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            ebargs: --win nsis
+          - os: ubuntu-latest
+            ebargs: --linux AppImage deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # keytar (OS credential vault) needs libsecret to build on Linux.
+      - name: Install libsecret (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Optional: inject the published Google OAuth client from a repo secret so
+      # "Connect Google" works in the shipped build. Skipped if the secret is unset.
+      - name: Inject Google OAuth client (optional)
+        shell: bash
+        env:
+          GOOGLE_OAUTH_CLIENT: ${{ secrets.GOOGLE_OAUTH_CLIENT }}
+        run: |
+          if [ -n "${GOOGLE_OAUTH_CLIENT}" ]; then
+            printf '%s' "${GOOGLE_OAUTH_CLIENT}" > config/google-oauth-client.json
+            echo "Injected config/google-oauth-client.json"
+          else
+            echo "No GOOGLE_OAUTH_CLIENT secret set; skipping."
+          fi
+
+      - name: Build UI
+        run: npm run build:ui
+
+      - name: Build installers
+        run: npx electron-builder ${{ matrix.ebargs }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional Windows code signing (set these repo secrets to enable):
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            releases/desktop/*.exe
+            releases/desktop/*.exe.blockmap
+            releases/desktop/*.AppImage
+            releases/desktop/*.deb
+            releases/desktop/*.yml
+            releases/desktop/*.yaml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+          files: dist/**/*

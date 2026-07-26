@@ -23,7 +23,7 @@ class TallyBackup {
      */
     async initialize() {
         try {
-            logger.info('Initializing Tally Backup system...');
+            logger.info('Initializing backup system...');
 
             // Initialize Google Drive service first
             this.googleDrive = new GoogleDriveService(this.config.googleDrive);
@@ -45,7 +45,7 @@ class TallyBackup {
             // Pre-validate and create restore destination folders
             await this.validateAndCreateRestoreDestinations();
 
-            logger.info('Tally Backup system initialized successfully');
+            logger.info('Backup system initialized successfully');
         } catch (error) {
             logger.error('Failed to initialize backup system:', error);
             throw error;

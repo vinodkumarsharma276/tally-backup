@@ -14,11 +14,23 @@ yarn-error.log*
 # Google Drive API credentials and tokens
 config/credentials.json
 config/token.json
+config/token_*.json
+config/*token*.json
+
+# Bundled distributable OAuth client (real values injected at build time)
+config/google-oauth-client.json
 
 # Backup data and state
 data/
 temp/
 logs/
+
+# Large local sample / test data — never commit (hundreds of MB, exceeds GitHub limits)
+Tally Data*/
+
+# Unpacked desktop build output (huge) and Linux artifacts — CI builds these
+releases/desktop/win-unpacked/
+*.AppImage
 
 # Build artifacts and distribution packages
 dist/

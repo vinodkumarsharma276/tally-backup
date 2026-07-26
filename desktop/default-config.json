@@ -1,0 +1,68 @@
+{
+  "desktop": {
+    "autoStart": true,
+    "minimizeToTray": true,
+    "notifications": true,
+    "schedulerEnabled": true
+  },
+  "storageProfiles": {
+    "local-backup": {
+      "type": "local",
+      "rootDir": ""
+    },
+    "google-drive": {
+      "type": "google_drive",
+      "rootFolderName": "Backup Genie"
+    }
+  },
+  "backup": {
+    "sources": [
+      {
+        "name": "My Data",
+        "enabled": false,
+        "operation": "backup",
+        "sourcePath": "",
+        "backupFolderName": "Backup Genie",
+        "storageProfile": "local-backup"
+      }
+    ],
+    "schedule": "0 20 * * *",
+    "concurrency": 8,
+    "compressionLevel": 6
+  },
+  "googleDrive": {
+    "credentialsPath": "secret:config.google.oauth.credentials",
+    "tokenPath": "secret:config.google.oauth.token",
+    "maxFileSize": 104857600,
+    "uploadTimeout": 300000
+  },
+  "retention": {
+    "keepDailyBackups": 30,
+    "keepWeeklyBackups": 12,
+    "keepMonthlyBackups": 12
+  },
+  "logging": {
+    "level": "info",
+    "maxFiles": 30,
+    "maxSize": "20m"
+  },
+  "email": {
+    "enabled": false,
+    "smtp": {
+      "host": "smtp.gmail.com",
+      "port": 587,
+      "secure": false,
+      "auth": {
+        "user": "",
+        "pass": ""
+      }
+    },
+    "from": "",
+    "to": "",
+    "subject": "Backup Genie Report",
+    "sendOnSuccess": true,
+    "sendOnFailure": true,
+    "includeStats": true,
+    "includeDriveLink": true
+  }
+}

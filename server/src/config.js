@@ -1,0 +1,86 @@
+'use strict';
+
+// Environment-driven configuration with safe development defaults.
+function bool(value, fallback = false) {
+  if (value === undefined) return fallback;
+  return /^(1|true|yes|on)$/i.test(String(value));
+}
+
+function int(value, fallback) {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeJson(value, fallback = {}) {
+  if (!value) return fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function loadConfig(env = process.env) {
+  return {
+    nodeEnv: env.NODE_ENV || 'development',
+    port: int(env.PORT, 8787),
+    jwtSecret: env.JWT_SECRET || 'dev-insecure-jwt-secret',
+    // For zero-downtime secret rotation: tokens signed with the previous secret
+    // still verify until they expire.
+    jwtSecretPrevious: env.JWT_SECRET_PREVIOUS || '',
+    tokenTtlSeconds: int(env.TOKEN_TTL_SECONDS, 900),
+    leaseTtlSeconds: int(env.LEASE_TTL_SECONDS, 3600),
+    // Data residency: the region customer data is stored in (compliance).
+    dataRegion: env.DATA_REGION || env.MANAGED_REGION || 'us-east-1',
+    store: env.STORE || 'memory',
+    sqlitePath: env.SQLITE_PATH || './data/control-plane.db',
+    databaseUrl: env.DATABASE_URL || '',
+    vendingProvider: env.VENDING_PROVIDER || 'dev',
+    vendingMasterSecret: env.VENDING_MASTER_SECRET || 'dev-master-secret',
+    managed: {
+      bucket: env.MANAGED_BUCKET || 'tally-managed-dev',
+      region: env.MANAGED_REGION || 'us-east-1',
+      endpoint: env.MANAGED_ENDPOINT || '',
+      forcePathStyle: bool(env.MANAGED_FORCE_PATH_STYLE, false),
+    },
+    devS3: {
+      accessKeyId: env.DEV_S3_ACCESS_KEY_ID || '',
+      secretAccessKey: env.DEV_S3_SECRET_ACCESS_KEY || '',
+    },
+    awsSts: {
+      roleArn: env.AWS_STS_ROLE_ARN || '',
+      region: env.AWS_REGION || 'us-east-1',
+    },
+    b2: {
+      keyId: env.B2_KEY_ID || '',
+      applicationKey: env.B2_APPLICATION_KEY || '',
+      bucketId: env.B2_BUCKET_ID || '',
+    },
+    r2: {
+      accountId: env.R2_ACCOUNT_ID || '',
+      apiToken: env.R2_API_TOKEN || '',
+      parentAccessKeyId: env.R2_PARENT_ACCESS_KEY_ID || '',
+      bucket: env.R2_BUCKET || '',
+    },
+    billing: {
+      provider: env.BILLING_PROVIDER || 'dev',
+      webhookSecret: env.BILLING_WEBHOOK_SECRET || 'dev-webhook-secret',
+      // Maps a billing-provider plan/price id -> internal plan id (starter|pro|business).
+      planMap: safeJson(env.BILLING_PLAN_MAP, {}),
+    },
+    reconciliation: {
+      provider: env.RECONCILE_PROVIDER || 'none', // none | s3
+      intervalMinutes: int(env.RECONCILE_INTERVAL_MINUTES, 0),
+    },
+    audit: {
+      sink: env.AUDIT_SINK || (env.NODE_ENV === 'production' ? 'file' : 'console'), // file | console | none
+      file: env.AUDIT_FILE || './data/audit.log',
+    },
+    mailer: {
+      // How the company sends report emails FROM its own address. Credentials
+      // live here on the server only, never in the desktop app.
+      provider: env.MAILER_PROVIDER || 'dev', // dev | resend | sendgrid
+      from: env.MAILER_FROM || 'Backup Genie <no-reply@backupgenie.app>',
+      apiKey: env.MAILER_API_KEY || '',
+    },
+    graceRetentionDays: int(env.GRACE_RETENTION_DAYS, 15),
+  };
+}
+
+module.exports = { loadConfig };

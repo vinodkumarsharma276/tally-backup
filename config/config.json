@@ -1,17 +1,40 @@
 {
+  "desktop": {
+    "autoStart": true,
+    "minimizeToTray": true,
+    "notifications": true,
+    "schedulerEnabled": true
+  },
+  "storageProfiles": {
+    "prod-google-drive": {
+      "type": "google_drive",
+      "rootFolderName": "Tally Backup",
+      "secretId": "prod-google-drive"
+    }
+  },
   "backup": {
     "sources": [
       {
         "name": "Tally Data",
+        "enabled": true,
         "operation": "backup",
-        "sourcePath": "C:\\Users\\vinodsharma\\Documents\\TALLY.ERP9",
-        "backupFolderName": "Tally Backup"
+        "sourcePath": "D:\\Tally Data\\TALLY.ERP9",
+        "backupFolderName": "Tally Backup",
+        "storageProfile": "prod-google-drive"
       },
       {
-        "name": "Customer-Data",
+        "name": "Data-Search",
+        "enabled": true,
         "operation": "restore",
-        "sourcePath": "C:\\Users\\vinodsharma\\Documents\\Customer-Data",
-        "backupFolderName": "Customer-Data"
+        "sourcePath": "C:\\Users\\Vinod Home\\Documents\\Customer-Data",
+        "backupFolderName": "Customer-Data",
+        "storageProfile": "prod-google-drive",
+        "restore": {
+          "mode": "manual",
+          "snapshotId": "latest",
+          "cleanDest": false,
+          "timezone": "Asia/Kolkata"
+        }
       }
     ],
     "schedule": "0 20 * * *",
@@ -21,8 +44,8 @@
     "chunkSizeMB": 50
   },
   "googleDrive": {
-    "credentialsPath": "./config/credentials.json",
-    "tokenPath": "./config/token.json",
+    "credentialsPath": "secret:config.google.oauth.credentials",
+    "tokenPath": "secret:config.google.oauth.token",
     "maxFileSize": 104857600,
     "uploadTimeout": 300000
   },
@@ -49,7 +72,7 @@
       "secure": false,
       "auth": {
         "user": "vinodkhoraa@gmail.com",
-        "pass": "qinj mbpx vlrz ians"
+        "pass": "secret:config.email.smtp.password"
       }
     },
     "from": "vinodkhoraa@gmail.com",
