@@ -28,8 +28,9 @@ logs/
 # Large local sample / test data — never commit (hundreds of MB, exceeds GitHub limits)
 Tally Data*/
 
-# Unpacked desktop build output (huge) and Linux artifacts — CI builds these
-releases/desktop/win-unpacked/
+# Desktop build output (installers, blockmaps, update feeds) — CI rebuilds and
+# publishes these to GitHub Releases; never track them.
+releases/desktop/
 *.AppImage
 
 # Build artifacts and distribution packages

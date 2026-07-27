@@ -69,12 +69,12 @@ jobs:
           name: dist-${{ matrix.os }}
           if-no-files-found: error
           path: |
-            releases/desktop/*.exe
-            releases/desktop/*.exe.blockmap
-            releases/desktop/*.AppImage
-            releases/desktop/*.deb
-            releases/desktop/*.yml
-            releases/desktop/*.yaml
+            releases/desktop/Backup-Genie-Setup-*.exe
+            releases/desktop/Backup-Genie-Setup-*.exe.blockmap
+            releases/desktop/Backup-Genie-*.AppImage
+            releases/desktop/Backup-Genie-*.deb
+            releases/desktop/latest.yml
+            releases/desktop/latest-linux.yml
 
   publish:
     needs: build
