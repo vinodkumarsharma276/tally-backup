@@ -24,6 +24,7 @@ const EmailService = require('../src/EmailService');
 const SnapshotStore = require('../src/versioning/SnapshotStore');
 const { createBackend, testStorageProfile } = require('../src/versioning/backends');
 const { PROGRESS_PREFIX } = require('../src/utils/cliProgress');
+const { statusIconBuffer } = require('./trayIcon');
 const {
   migrateConfigSecrets,
   sanitizeConfigForRenderer,
@@ -147,21 +148,22 @@ function escapeXml(value) {
   })[character]);
 }
 
+function appIconImage() {
+  // .ico first: Windows uses it for the taskbar button.
+  for (const file of ['icon.ico', 'icon.png']) {
+    const candidate = path.join(appRoot(), 'build', file);
+    if (fs.existsSync(candidate)) {
+      const image = nativeImage.createFromPath(candidate);
+      if (!image.isEmpty()) return image;
+    }
+  }
+  return nativeImage.createFromBuffer(statusIconBuffer('idle', 256));
+}
+
 function createStatusImage(state = 'idle') {
-  const styles = {
-    idle: { color: '#2fcf91', label: 'V' },
-    running: { color: '#4d9fff', label: '↻' },
-    success: { color: '#2fcf91', label: '✓' },
-    failed: { color: '#ff6675', label: '!' },
-    paused: { color: '#f0b956', label: 'Ⅱ' },
-  };
-  const style = styles[state] || styles.idle;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-    <rect x="2" y="2" width="28" height="28" rx="9" fill="#071018" stroke="${style.color}" stroke-width="2"/>
-    <circle cx="16" cy="16" r="9" fill="${style.color}"/>
-    <text x="16" y="20" text-anchor="middle" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="#071018">${escapeXml(style.label)}</text>
-  </svg>`;
-  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`).resize({ width: 20, height: 20 });
+  // Electron's nativeImage cannot decode SVG on Windows, so tray icons are real
+  // PNG buffers (see desktop/trayIcon.js).
+  return nativeImage.createFromBuffer(statusIconBuffer(state, 32));
 }
 
 function humanBytes(value = 0) {
@@ -508,6 +510,7 @@ function startChildOperation(type, args = {}) {
   const scriptArgs = ['--config', configPath()];
   if (type === 'backup') {
     script = path.join(appRoot(), 'bin', 'versioned-backup.js');
+    if (args.sourceName) scriptArgs.push('--source', args.sourceName);
   } else if (type === 'restore') {
     script = path.join(appRoot(), 'bin', 'versioned-restore.js');
     if (!args.sourceName) throw new Error('Choose a restore source.');
@@ -695,6 +698,7 @@ async function createWindow() {
     minHeight: 700,
     backgroundColor: '#071018',
     title: APP_NAME,
+    icon: appIconImage(),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

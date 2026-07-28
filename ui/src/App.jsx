@@ -118,6 +118,7 @@ function ProgressPanel({ operation, progress, operationLogs, onCancel }) {
 
 function Overview({ config, operation, progress, operationLogs, startBackup, cancelOperation, setPage }) {
   const sources = config.backup?.sources || [];
+  const running = operation?.status === 'running';
   const enabled = sources.filter((source) => source.enabled !== false);
   const backups = enabled.filter((source) => source.operation === 'backup');
   const restores = enabled.filter((source) => source.operation === 'restore');
@@ -132,7 +133,7 @@ function Overview({ config, operation, progress, operationLogs, startBackup, can
           <h2>Your data, protected automatically.</h2>
           <p>Versioned backups preserve every restore point while uploading only data that changed.</p>
           <div className="hero-actions">
-            <Button onClick={startBackup} disabled={Boolean(operation?.status === 'running')}>Run backup now</Button>
+            <Button onClick={() => startBackup()} disabled={running}>Back up all sources</Button>
             <Button variant="secondary" onClick={() => setPage('restore')}>Restore data</Button>
           </div>
         </div>
@@ -164,12 +165,42 @@ function Overview({ config, operation, progress, operationLogs, startBackup, can
               <div className={cx('source-badge', source.operation)}>{source.operation === 'backup' ? '↑' : '↓'}</div>
               <div className="source-summary-main"><strong>{source.name}</strong><span>{source.sourcePath}</span></div>
               <div className="source-summary-meta"><Pill tone={source.operation === 'backup' ? 'success' : 'info'}>{source.operation}</Pill><span>{source.storageProfile || source.backupFolderName}</span></div>
+              {source.operation === 'backup' && (
+                <Button variant="secondary" disabled={running} onClick={() => startBackup(source.name)}>Back up</Button>
+              )}
             </div>
           ))}
         </div>
       </section>
     </div>
   );
+}
+
+function defaultLabel(folderPath) {
+  const parts = String(folderPath || '').replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts[parts.length - 1] || 'folder';
+}
+
+// Folders are stored as { path, label }; older configs used plain strings.
+function folderEntries(source) {
+  const raw = source.sourcePaths && source.sourcePaths.length ? source.sourcePaths : [source.sourcePath || ''];
+  return raw.map((entry) => (typeof entry === 'string' ? { path: entry, label: '' } : { path: entry?.path || '', label: entry?.label || '' }));
+}
+
+function foldersPatch(list) {
+  return { sourcePaths: list, sourcePath: list[0]?.path || '' };
+}
+
+function setFolder(list, index, patch) {
+  return foldersPatch(list.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
+}
+
+function removeFolder(list, index) {
+  return foldersPatch(list.filter((_, i) => i !== index));
+}
+
+function addFolder(list) {
+  return foldersPatch([...list, { path: '', label: '' }]);
 }
 
 function Sources({ config, setConfig, chooseDirectory }) {
@@ -204,7 +235,7 @@ function Sources({ config, setConfig, chooseDirectory }) {
     <div className="page-stack">
       <div className="page-title-row"><div><span className="eyebrow">Data jobs</span><h2>Backup & restore sources</h2><p>Choose what to protect, where to store it, and when restores should run.</p></div><Button onClick={add}>+ Add source</Button></div>
       {sources.map((source, index) => (
-        <article className="card source-editor" key={`${source.name}-${index}`}>
+        <article className="card source-editor" key={`source-${index}`}>
           <div className="source-editor-head">
             <div className={cx('source-badge', source.operation)}>{source.operation === 'backup' ? '↑' : '↓'}</div>
             <div><h3>{source.name || 'Unnamed source'}</h3><span>{source.operation === 'backup' ? 'Local data → storage' : 'Storage → local folder'}</span></div>
@@ -219,10 +250,44 @@ function Sources({ config, setConfig, chooseDirectory }) {
               <option value="">Choose storage…</option>{profiles.map((name) => <option key={name}>{name}</option>)}
             </SelectField>
           </div>
-          <div className="path-row">
-            <Field label={source.operation === 'backup' ? 'Source folder' : 'Restore destination'} value={source.sourcePath || ''} onChange={(event) => update(index, { sourcePath: event.target.value })} />
-            <Button variant="secondary" onClick={async () => { const selected = await chooseDirectory(source.sourcePath); if (selected) update(index, { sourcePath: selected }); }}>Browse</Button>
-          </div>
+          {source.operation === 'backup' ? (
+            <div className="folder-list">
+              <span className="field-label">Folders to back up</span>
+              {folderEntries(source).map((entry, fi, list) => (
+                <div className="folder-row" key={`folder-${fi}`}>
+                  <Field
+                    label={fi === 0 ? 'Folder' : `Folder ${fi + 1}`}
+                    value={entry.path}
+                    onChange={(event) => update(index, setFolder(list, fi, { path: event.target.value }))}
+                  />
+                  {list.length > 1 && (
+                    <Field
+                      label="Store as"
+                      value={entry.label}
+                      placeholder={defaultLabel(entry.path)}
+                      onChange={(event) => update(index, setFolder(list, fi, { label: event.target.value }))}
+                    />
+                  )}
+                  <Button variant="secondary" onClick={async () => {
+                    const selected = await chooseDirectory(entry.path);
+                    if (selected) update(index, setFolder(list, fi, { path: selected }));
+                  }}>Browse</Button>
+                  {list.length > 1 && (
+                    <Button variant="danger-ghost" onClick={() => update(index, removeFolder(list, fi))}>Remove</Button>
+                  )}
+                </div>
+              ))}
+              <Button variant="ghost" className="add-folder" onClick={() => update(index, addFolder(folderEntries(source)))}>+ Add another folder</Button>
+              {folderEntries(source).length > 1 && (
+                <span className="field-hint">Each folder is stored under its own sub-folder ("Store as"), so identically named files never collide. A restore recreates them side by side.</span>
+              )}
+            </div>
+          ) : (
+            <div className="path-row">
+              <Field label="Restore destination" value={source.sourcePath || ''} onChange={(event) => update(index, { sourcePath: event.target.value })} />
+              <Button variant="secondary" onClick={async () => { const selected = await chooseDirectory(source.sourcePath); if (selected) update(index, { sourcePath: selected }); }}>Browse</Button>
+            </div>
+          )}
           {source.operation === 'restore' && (
             <div className="subpanel">
               <div className="form-grid three">
@@ -249,9 +314,22 @@ const publicProfileFields = {
   managed: [['controlPlaneUrl', 'Control plane URL'], ['tenantId', 'Account / tenant ID']],
 };
 
-function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile }) {
+function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile, notify }) {
   const profiles = config.storageProfiles || {};
   const secretStatus = config._secretStatus || { storageProfiles: {} };
+  const usedBy = (name) => (config.backup?.sources || []).filter((source) => source.storageProfile === name).map((source) => source.name);
+  const removeProfile = (name) => {
+    const inUse = usedBy(name);
+    if (inUse.length) {
+      notify(`"${name}" is still used by: ${inUse.join(', ')}. Change those sources first.`, 'error');
+      return;
+    }
+    setConfig((current) => {
+      const next = { ...current.storageProfiles };
+      delete next[name];
+      return { ...current, storageProfiles: next };
+    });
+  };
   const update = (name, patch) => setConfig((current) => ({ ...current, storageProfiles: { ...current.storageProfiles, [name]: { ...current.storageProfiles[name], ...patch } } }));
   const updateAuth = (name, patch) => setConfig((current) => ({
     ...current,
@@ -315,6 +393,7 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleA
                   : ['local'].includes(profile.type) ? 'This provider does not require a password.' : 'Enter credentials and save to move them into secure OS storage.'}
             </div>
             <div className="card-footer storage-actions">
+              <Button variant="danger-ghost" onClick={() => removeProfile(name)}>Remove</Button>
               <Button variant="secondary" busy={testingProfile === name} onClick={() => testStorage(name)}>Test connection</Button>
               {profile.type === 'google_drive' && <Button variant="ghost" onClick={startGoogleAuth}>Connect Google</Button>}
             </div>
@@ -559,8 +638,13 @@ function WizardProviderDetails({ provider, setProvider, chooseDirectory }) {
   return null;
 }
 
-function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, progress, operationLogs, notify }) {
+function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, progress, operationLogs, notify, theme, onToggleTheme }) {
   const [step, setStep] = useState(0);
+  const [maxVisited, setMaxVisited] = useState(0);
+  const goToStep = (next) => {
+    setStep(next);
+    setMaxVisited((current) => Math.max(current, next));
+  };
   const [draft, setDraft] = useState(() => initWizardDraft(baseConfig));
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -634,6 +718,12 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
       );
     }
     if (step === 1) {
+      const samePath = (draft.tallyPath || '').trim().toLowerCase();
+      const priorTargets = samePath
+        ? (baseConfig.backup?.sources || []).filter(
+            (s) => s.operation === 'backup' && (s.sourcePath || '').trim().toLowerCase() === samePath
+          )
+        : [];
       return (
         <div className="wizard-step-body">
           <span className="eyebrow">Step 1</span>
@@ -643,6 +733,28 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
             <Field label="Data folder" value={draft.tallyPath} onChange={(e) => setDraft((d) => ({ ...d, tallyPath: e.target.value }))} />
             <Button variant="secondary" onClick={async () => { const s = await chooseDirectory(draft.tallyPath); if (s) setDraft((d) => ({ ...d, tallyPath: s })); }}>Browse</Button>
           </div>
+          {priorTargets.length > 0 && (
+            <div className="prior-targets">
+              <strong>This folder is already backed up to:</strong>
+              <ul>
+                {priorTargets.map((s, i) => {
+                  const profile = (baseConfig.storageProfiles || {})[s.storageProfile] || {};
+                  return (
+                    <li key={`${s.name}-${i}`}>
+                      <span className={`provider-logo provider-${profile.type || 'local'}`}>
+                        {profile.type === 'google_drive' ? 'G' : profile.type === 'azure_blob' ? 'A' : profile.type === 's3' ? 'S3' : profile.type === 'network' ? 'N' : profile.type === 'managed' ? 'BG' : 'L'}
+                      </span>
+                      <div>
+                        <strong>{s.storageProfile || 'Unnamed storage'}</strong>
+                        <span>{storageName(profile.type)}{profile.rootFolderName ? ` · ${profile.rootFolderName}` : ''}{profile.rootDir ? ` · ${profile.rootDir}` : ''}{profile.bucket ? ` · ${profile.bucket}` : ''}{profile.containerName ? ` · ${profile.containerName}` : ''}</span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <span className="prior-targets-hint">Choose a different destination on the next step to add another copy, or keep using one of these.</span>
+            </div>
+          )}
         </div>
       );
     }
@@ -744,10 +856,14 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
     <div className="wizard-overlay">
       <div className="wizard">
         <aside className="wizard-sidebar">
-          <div className="brand"><div className="brand-mark">BG</div><div><strong>Backup Genie</strong><span>Guided setup</span></div></div>
+          <div className="brand"><div className="brand-mark">BG</div><div><strong>Backup Genie</strong><span>Guided setup</span></div><button className="theme-toggle" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={onToggleTheme}>{theme === 'dark' ? '☀' : '☾'}</button></div>
           <ol className="wizard-steps">
             {WIZARD_STEPS.map((label, index) => (
-              <li key={label} className={cx(index === step && 'active', index < step && 'done')}><span>{index < step ? '✓' : index + 1}</span>{label}</li>
+              <li key={label} className={cx(index === step && 'active', index < step && 'done', index <= maxVisited && 'navigable')}>
+                <button type="button" disabled={index > maxVisited} onClick={() => index <= maxVisited && setStep(index)}>
+                  <span>{index < step ? '✓' : index + 1}</span>{label}
+                </button>
+              </li>
             ))}
           </ol>
           <div className="wizard-tip">Everything here can be changed later in Settings.</div>
@@ -755,11 +871,11 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
         <div className="wizard-main">
           <div className="wizard-body">{renderStep()}</div>
           <div className="wizard-footer">
-            <div>{step > 0 && <Button variant="ghost" onClick={() => setStep((s) => s - 1)}>Back</Button>}</div>
+            <div>{step > 0 && <Button variant="ghost" onClick={() => goToStep(step - 1)}>Back</Button>}</div>
             <div className="wizard-footer-right">
-              {canSkip(step) && <Button variant="secondary" onClick={() => setStep((s) => s + 1)}>Skip</Button>}
+              {canSkip(step) && <Button variant="secondary" onClick={() => goToStep(step + 1)}>Skip</Button>}
               {step < lastStep
-                ? <Button disabled={!stepValid(step)} onClick={() => setStep((s) => s + 1)}>Continue</Button>
+                ? <Button disabled={!stepValid(step)} onClick={() => goToStep(step + 1)}>Continue</Button>
                 : <Button busy={saving} onClick={finish}>Finish setup</Button>}
             </div>
           </div>
@@ -789,6 +905,12 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [showWizard, setShowWizard] = useState(false);
   const [updateState, setUpdateState] = useState({ status: 'idle' });
+  const [theme, setTheme] = useState(() => localStorage.getItem('bg-theme') || 'dark');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('bg-theme', theme);
+  }, [theme]);
 
   const notify = (message, tone = 'success') => {
     setToast({ message, tone });
@@ -860,11 +982,11 @@ export default function App() {
     finally { setSaving(false); }
   };
   const chooseDirectory = (defaultPath) => api.chooseDirectory({ defaultPath });
-  const startBackup = async () => {
+  const startBackup = async (sourceName) => {
     try {
       if (!enabledBackupCount) throw new Error('Enable at least one backup source first.');
       await persistIfNeeded();
-      await api.startOperation({ type: 'backup' });
+      await api.startOperation(sourceName ? { type: 'backup', sourceName } : { type: 'backup' });
     } catch (error) { notify(error.message, 'error'); }
   };
   const startRestore = async (request) => {
@@ -915,6 +1037,8 @@ export default function App() {
         progress={progress}
         operationLogs={operationLogs}
         notify={notify}
+        theme={theme}
+        onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
       />
     );
   }
@@ -922,7 +1046,7 @@ export default function App() {
   let content;
   if (page === 'overview') content = <Overview {...{ config, operation, progress, operationLogs, startBackup, cancelOperation: api.cancelOperation, setPage }} />;
   if (page === 'sources') content = <Sources {...{ config, setConfig, chooseDirectory }} />;
-  if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile }} />;
+  if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile, notify }} />;
   if (page === 'restore') content = <Restore {...{ config, snapshots, snapshotsMeta, loadSnapshots, startRestore, chooseDirectory, operation }} />;
   if (page === 'logs') content = <Logs {...{ logs, refreshLogs, operationLogs }} />;
   if (page === 'settings') content = <Settings {...{ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard: () => setShowWizard(true), updateState, checkForUpdates, installUpdate }} />;
@@ -935,7 +1059,7 @@ export default function App() {
         <div className="sidebar-status"><span className={cx('status-pulse', schedulerState.enabled ? '' : 'paused')} /><div><strong>{schedulerState.enabled ? 'Schedules active' : 'Schedules paused'}</strong><span>{schedulerState.jobs.length} jobs · Version {systemInfo?.version || '1.1.0'}</span></div></div>
       </aside>
       <main>
-        <header className="topbar"><div><h1>{PAGES.find(([key]) => key === page)?.[1]}</h1><span className="config-path" title={configFile}>{configFile}</span></div><div className="topbar-actions"><Pill tone={operation?.status === 'running' ? 'info' : 'success'}>{operation?.status === 'running' ? 'Running' : 'Ready'}</Pill><Button variant={dirty ? 'primary' : 'secondary'} busy={saving} onClick={save}>{dirty ? 'Save changes' : 'Saved'}</Button></div></header>
+        <header className="topbar"><div><h1>{PAGES.find(([key]) => key === page)?.[1]}</h1><span className="config-path" title={configFile}>{configFile}</span></div><div className="topbar-actions"><button className="theme-toggle" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀' : '☾'}</button><Pill tone={operation?.status === 'running' ? 'info' : 'success'}>{operation?.status === 'running' ? 'Running' : 'Ready'}</Pill><Button variant={dirty ? 'primary' : 'secondary'} busy={saving} onClick={save}>{dirty ? 'Save changes' : 'Saved'}</Button></div></header>
         {(updateState.status === 'available' || updateState.status === 'downloading' || updateState.status === 'downloaded') && (
           <div className={cx('update-banner', updateState.status === 'downloaded' && 'ready')}>
             <span className="update-dot" />

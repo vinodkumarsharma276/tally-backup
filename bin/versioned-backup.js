@@ -44,6 +44,11 @@ function resolveConfigPath(args = process.argv.slice(2)) {
   return path.resolve('config', 'config_test.json');
 }
 
+function resolveSourceFilter(args = process.argv.slice(2)) {
+  const i = args.indexOf('--source');
+  return i >= 0 && args[i + 1] ? args[i + 1] : null;
+}
+
 async function main(argv = process.argv.slice(2)) {
   const configPath = resolveConfigPath(argv);
   logger.info('='.repeat(60));
@@ -56,9 +61,16 @@ async function main(argv = process.argv.slice(2)) {
   }
   const config = await fs.readJson(configPath);
 
+  const onlySource = resolveSourceFilter(argv);
   const backupSources = (config.backup.sources || []).filter(
-    (s) => s.operation === 'backup' && s.enabled !== false
+    (s) => s.operation === 'backup' && s.enabled !== false && (!onlySource || s.name === onlySource)
   );
+  if (onlySource) {
+    if (backupSources.length === 0) {
+      throw new Error(`No enabled backup source named '${onlySource}' was found.`);
+    }
+    logger.info(`Backing up only source '${onlySource}'.`);
+  }
 
   const requiresDriveService = backupSources.some((source) => {
     const profileName = source.storageProfile;
@@ -93,8 +105,13 @@ async function main(argv = process.argv.slice(2)) {
     }
 
     for (const source of backupSources) {
+      // A source may protect one folder (`sourcePath`) or several (`sourcePaths`,
+      // each a path string or { path, label }).
+      const sourceFolders = Array.isArray(source.sourcePaths) && source.sourcePaths.length
+        ? source.sourcePaths
+        : [source.sourcePath];
       logger.info(
-        `Backing up '${source.name}' from ${source.sourcePath} -> storage '${source.storageProfile || source.backupFolderName}'`
+        `Backing up '${source.name}' from ${sourceFolders.map((f) => (typeof f === 'string' ? f : f.path)).join(', ')} -> storage '${source.storageProfile || source.backupFolderName}'`
       );
 
       const { backend, storageLabel, controlPlane, lease, profile } = await createBackend({
@@ -124,7 +141,7 @@ async function main(argv = process.argv.slice(2)) {
         logger,
       });
 
-      const stats = await engine.backup(source.sourcePath, {
+      const stats = await engine.backup(sourceFolders, {
         source: source.name,
         onProgress: renderBackupProgress,
       });

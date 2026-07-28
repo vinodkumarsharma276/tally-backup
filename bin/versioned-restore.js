@@ -71,11 +71,17 @@ function validateRestoreDestination(config, sourceConfig, destPath, force) {
     (s) => s.operation === 'backup' && s.enabled !== false
   );
   for (const source of backupSources) {
-    if (path.resolve(source.sourcePath) === dest && !force) {
-      throw new Error(
-        `Refusing to restore into live backup source path: ${dest}. ` +
-          'Use a different destination or pass --force.'
-      );
+    const folders = (Array.isArray(source.sourcePaths) && source.sourcePaths.length
+      ? source.sourcePaths
+      : [source.sourcePath]
+    ).map((f) => (typeof f === 'string' ? f : f && f.path));
+    for (const folder of folders) {
+      if (folder && path.resolve(folder) === dest && !force) {
+        throw new Error(
+          `Refusing to restore into live backup source path: ${dest}. ` +
+            'Use a different destination or pass --force.'
+        );
+      }
     }
   }
   return dest;

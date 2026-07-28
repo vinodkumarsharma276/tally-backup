@@ -84,35 +84,11 @@
   "backup": {
     "sources": [
       {
-        "name": "My Data",
+        "name": "Tally Backup",
         "enabled": true,
         "operation": "backup",
-        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\Tally Data Day3",
-        "storageProfile": "primary",
-        "backupFolderName": "Backup Genie"
-      },
-      {
-        "name": "Tally Data",
-        "enabled": true,
-        "operation": "backup",
-        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\Tally Data Day2",
-        "backupFolderName": "Tally Backup New",
-        "storageProfile": "test-google-drive"
-      },
-      {
-        "name": "Restore Latest Tally Data",
-        "enabled": true,
-        "operation": "restore",
-        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\temp\\restore-config-test",
-        "backupFolderName": "Tally Backup New",
-        "storageProfile": "test-google-drive",
-        "restore": {
-          "mode": "scheduled",
-          "schedule": "0 1 * * *",
-          "snapshotId": "latest",
-          "cleanDest": true,
-          "timezone": "Asia/Kolkata"
-        }
+        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\Tally Data Day1",
+        "storageProfile": "primary"
       }
     ],
     "schedule": "0 20 * * *",
@@ -144,7 +120,7 @@
     "maxSize": "10m"
   },
   "email": {
-    "enabled": true,
+    "enabled": false,
     "smtp": {
       "host": "smtp.gmail.com",
       "port": 587,
@@ -164,7 +140,7 @@
     "mode": "company"
   },
   "onboarding": {
-    "completed": false,
+    "completed": true,
     "version": 1
   }
 }

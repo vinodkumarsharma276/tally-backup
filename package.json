@@ -46,6 +46,7 @@
     "publish-npm": "npm publish",
     "test": "echo \"No tests specified\" && exit 1",
     "test:packed": "node test/packed.test.js",
+    "test:multi-source": "node test/multi-source.test.js",
     "postinstall": "node scripts/post-install.js"
   },
   "preferGlobal": true,

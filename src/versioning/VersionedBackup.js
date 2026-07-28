@@ -50,21 +50,57 @@ class VersionedBackup {
   }
 
   /**
-   * Back up `sourceDir` into a new snapshot.
+   * Back up one or more source folders into a new snapshot.
+   *
+   * `sourceDir` may be a single path (classic behaviour: file paths are stored
+   * relative to that root) or an array of roots. Each array entry is either a
+   * path string or `{ path, label }`, where `label` names the sub-folder the
+   * files are stored under (defaults to the folder's own name). With multiple
+   * roots every stored path is prefixed with that namespace, so identically
+   * named files stay apart and a restore recreates them as sibling folders.
+   *
    * @returns {Promise<object>} stats including snapshotId.
    */
-  async backup(sourceDir, { source = path.basename(sourceDir), onProgress } = {}) {
+  async backup(sourceDir, { source, onProgress } = {}) {
     const started = Date.now();
-    const root = path.resolve(sourceDir);
-    if (!(await fs.pathExists(root))) throw new Error(`Source not found: ${root}`);
+    const inputs = (Array.isArray(sourceDir) ? sourceDir : [sourceDir]).filter(Boolean);
+    if (inputs.length === 0) throw new Error('No source folder was provided.');
 
-    const files = await this._walk(root);
+    const roots = [];
+    const used = new Set();
+    for (const input of inputs) {
+      const rawPath = typeof input === 'string' ? input : input.path;
+      const label = typeof input === 'string' ? '' : input.label || '';
+      if (!rawPath) continue;
+      const root = path.resolve(rawPath);
+      if (!(await fs.pathExists(root))) throw new Error(`Source not found: ${root}`);
+      let namespace = '';
+      if (inputs.length > 1) {
+        const base = (label || path.basename(root) || 'folder').replace(/[\\/:*?"<>|]/g, '_').trim();
+        namespace = base;
+        let n = 2;
+        while (used.has(namespace.toLowerCase())) namespace = `${base}-${n++}`;
+        used.add(namespace.toLowerCase());
+      }
+      roots.push({ root, namespace });
+    }
+    if (roots.length === 0) throw new Error('No source folder was provided.');
+    const sourceLabel = source || path.basename(roots[0].root);
+
+    // Collect every file with its (optionally namespaced) stored path.
+    const entries = [];
+    for (const { root, namespace } of roots) {
+      for (const file of await this._walk(root)) {
+        const rel = path.relative(root, file).split(path.sep).join('/');
+        entries.push({ file, rel: namespace ? `${namespace}/${rel}` : rel });
+      }
+    }
 
     // Pre-pass: stat all files for the grand total size (drives the progress bar).
     const fileStats = [];
     let grandTotalBytes = 0;
-    for (const file of files) {
-      const st = await fs.stat(file);
+    for (const entry of entries) {
+      const st = await fs.stat(entry.file);
       fileStats.push(st);
       grandTotalBytes += st.size;
     }
@@ -126,7 +162,7 @@ class VersionedBackup {
           processedBytes: totalBytes,
           totalBytes: grandTotalBytes,
           filesDone,
-          fileCount: files.length,
+          fileCount: entries.length,
           totalChunks,
           newChunks,
           newBytesStored,
@@ -135,9 +171,8 @@ class VersionedBackup {
       }
     };
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const rel = path.relative(root, file).split(path.sep).join('/');
+    for (let i = 0; i < entries.length; i++) {
+      const { file, rel } = entries[i];
       const chunks = [];
 
       await this.chunker.chunkFile(file, async ({ hash, size, buffer }) => {
@@ -169,9 +204,12 @@ class VersionedBackup {
     const snapshot = {
       id,
       createdAt: new Date().toISOString(),
-      source,
+      source: sourceLabel,
       chunkParams: { avg: this.chunker.avg, min: this.chunker.min, max: this.chunker.max },
-      fileCount: files.length,
+      // Records every folder in this snapshot. `namespace` is the sub-folder the
+      // files are stored under (empty for a classic single-root snapshot).
+      roots: roots.map((r) => ({ path: r.root, namespace: r.namespace })),
+      fileCount: entries.length,
       totalBytes,
       totalChunks,
       files: manifest,
@@ -180,8 +218,8 @@ class VersionedBackup {
 
     const stats = {
       snapshotId: id,
-      source,
-      fileCount: files.length,
+      source: sourceLabel,
+      fileCount: entries.length,
       totalBytes,
       totalChunks,
       newChunks,
@@ -189,7 +227,8 @@ class VersionedBackup {
       durationMs: Date.now() - started,
     };
     this.log.info(
-      `Backup '${source}' -> snapshot ${id}: ${files.length} files, ` +
+      `Backup '${sourceLabel}' -> snapshot ${id}: ${entries.length} files` +
+        `${roots.length > 1 ? ` from ${roots.length} folders` : ''}, ` +
         `${totalChunks} chunks, ${newChunks} new (${(newBytesStored / 1048576).toFixed(2)} MB uploaded)`
     );
     return stats;
