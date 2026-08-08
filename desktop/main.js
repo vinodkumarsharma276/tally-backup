@@ -406,17 +406,38 @@ async function configureSchedules(config) {
   const enabledBackups = (config.backup?.sources || []).filter(
     (source) => source.operation === 'backup' && source.enabled !== false
   );
-  if (enabledBackups.length > 0 && config.backup?.schedule) {
+
+  // A source with its own cron is scheduled individually; the rest fall under
+  // the global backup schedule.
+  const perSource = enabledBackups.filter((source) => source.schedule);
+  for (const source of perSource) {
+    const expression = source.schedule;
+    const timezone = source.timezone || config.backup?.timezone || 'Asia/Kolkata';
+    if (!cron.validate(expression)) {
+      errors.push(`Invalid schedule for ${source.name}: ${expression}`);
+      continue;
+    }
+    const task = cron.createTask(
+      expression,
+      () => dispatchScheduled('backup', { sourceName: source.name }),
+      { timezone }
+    );
+    task.start();
+    schedulerJobs.push({ label: `Backup: ${source.name}`, expression, timezone, task });
+  }
+
+  const usesGlobal = enabledBackups.filter((source) => !source.schedule);
+  if (usesGlobal.length > 0 && config.backup?.schedule) {
     const expression = config.backup.schedule;
     const timezone = config.backup.timezone || 'Asia/Kolkata';
     if (cron.validate(expression)) {
-      const task = cron.createTask(
-        expression,
-        () => dispatchScheduled('backup'),
-        { timezone }
-      );
+    const task = cron.createTask(
+      expression,
+      () => dispatchScheduled('backup', { sourceNames: usesGlobal.map((s) => s.name) }),
+      { timezone }
+    );
       task.start();
-      schedulerJobs.push({ label: 'Daily backup', expression, timezone, task });
+      schedulerJobs.push({ label: `Daily backup (${usesGlobal.length} source(s))`, expression, timezone, task });
     } else {
       errors.push(`Invalid backup schedule: ${expression}`);
     }
@@ -504,13 +525,17 @@ function consumeOutput(stream, runId, streamName) {
 }
 
 function startChildOperation(type, args = {}) {
-  if (currentOperation) throw new Error('Another backup or restore operation is already running.');
+  // Google sign-in is interactive and touches no backup state, so it is allowed
+  // to run while a backup or restore is in progress.
+  const isAuth = type === 'auth-google';
+  if (!isAuth && currentOperation) throw new Error('Another backup or restore operation is already running.');
 
   let script;
   const scriptArgs = ['--config', configPath()];
   if (type === 'backup') {
     script = path.join(appRoot(), 'bin', 'versioned-backup.js');
     if (args.sourceName) scriptArgs.push('--source', args.sourceName);
+    for (const name of args.sourceNames || []) scriptArgs.push('--source', name);
   } else if (type === 'restore') {
     script = path.join(appRoot(), 'bin', 'versioned-restore.js');
     if (!args.sourceName) throw new Error('Choose a restore source.');
@@ -538,18 +563,21 @@ function startChildOperation(type, args = {}) {
     },
   });
 
-  currentOperation = {
-    runId,
-    type,
-    origin: args.origin || 'manual',
-    sourceName: args.sourceName || null,
-    pid: child.pid,
-    startedAt: new Date().toISOString(),
-    child,
-  };
-  latestProgress = null;
-  setTrayState('running', `${APP_NAME} — ${type === 'restore' ? 'Restoring…' : type === 'backup' ? 'Backing up…' : 'Connecting…'}`);
-  emit('operation:state', { ...currentOperation, child: undefined, status: 'running' });
+  const startedAt = new Date().toISOString();
+  if (!isAuth) {
+    currentOperation = {
+      runId,
+      type,
+      origin: args.origin || 'manual',
+      sourceName: args.sourceName || null,
+      pid: child.pid,
+      startedAt,
+      child,
+    };
+    latestProgress = null;
+    setTrayState('running', `${APP_NAME} — ${type === 'restore' ? 'Restoring…' : 'Backing up…'}`);
+    emit('operation:state', { ...currentOperation, child: undefined, status: 'running' });
+  }
   consumeOutput(child.stdout, runId, 'stdout');
   consumeOutput(child.stderr, runId, 'stderr');
 
@@ -558,6 +586,12 @@ function startChildOperation(type, args = {}) {
     appendDesktopLog(`${type} process error: ${error.message}`);
   });
   child.on('exit', (code, signal) => {
+    if (isAuth) {
+      emit('auth:state', { runId, status: code === 0 ? 'success' : 'failed', code });
+      appendDesktopLog(`Google sign-in ${code === 0 ? 'completed' : 'failed'} (code=${code}).`);
+      if (code === 0) showNotification('Google connected', 'Your Google account is now linked.', 'success');
+      return;
+    }
     const completed = {
       runId,
       type,
@@ -570,7 +604,7 @@ function startChildOperation(type, args = {}) {
     };
     currentOperation = null;
     emit('operation:state', completed);
-    const description = type === 'restore' ? 'Restore' : type === 'backup' ? 'Backup' : 'Connection';
+    const description = type === 'restore' ? 'Restore' : 'Backup';
     if (code === 0) {
       setTrayState('success', `${APP_NAME} — ${description} completed successfully`);
       const progressDetail = latestProgress?.newBytesStored !== undefined
@@ -586,7 +620,7 @@ function startChildOperation(type, args = {}) {
     scheduleTrayReset();
   });
 
-  return { runId, type, pid: child.pid, startedAt: currentOperation.startedAt };
+  return { runId, type, pid: child.pid, startedAt };
 }
 
 function safeStartOperation(type, args = {}) {
@@ -666,6 +700,26 @@ function registerIpc() {
   ipcMain.handle('scheduler:status', async () => schedulerState);
   ipcMain.handle('snapshots:list', async (_event, sourceName) => listSnapshots(sourceName));
   ipcMain.handle('storage:test', async (_event, profileName) => testProfile(profileName));
+  ipcMain.handle('storage:google-account', async () => {
+    try {
+      const config = await loadConfig();
+      if (!config.googleDrive) return null;
+      const service = new GoogleDriveService(config.googleDrive);
+      await service.initialize();
+      const about = await service.drive.about.get({
+        fields: 'user(emailAddress,displayName),storageQuota(limit,usage)',
+      });
+      const data = about.data || {};
+      return {
+        email: data.user?.emailAddress || null,
+        name: data.user?.displayName || null,
+        quotaUsed: Number(data.storageQuota?.usage || 0),
+        quotaLimit: Number(data.storageQuota?.limit || 0),
+      };
+    } catch (error) {
+      return null;
+    }
+  });
   ipcMain.handle('logs:get', async (_event, limit) => readLogTail(limit));
   ipcMain.handle('email:test', async () => {
     const config = await loadConfig();

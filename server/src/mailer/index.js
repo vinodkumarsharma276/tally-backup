@@ -35,7 +35,10 @@ class ResendMailer {
       headers: { Authorization: `Bearer ${this.config.mailer.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: this.config.mailer.from, to: [to], subject, html }),
     });
-    if (!resp.ok) throw new Error(`Resend send failed: ${resp.status}`);
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      throw new Error(`Resend send failed (${resp.status}): ${detail || 'no details'}`);
+    }
     const body = await resp.json().catch(() => ({}));
     return { id: body.id, provider: 'resend' };
   }
@@ -61,13 +64,49 @@ class SendgridMailer {
         content: [{ type: 'text/html', value: html }],
       }),
     });
-    if (!resp.ok) throw new Error(`SendGrid send failed: ${resp.status}`);
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      throw new Error(`SendGrid send failed (${resp.status}): ${detail || 'no details'}`);
+    }
     return { id: resp.headers.get('x-message-id') || undefined, provider: 'sendgrid' };
+  }
+}
+
+class SmtpMailer {
+  constructor(config) {
+    this.config = config;
+    this.transporter = null;
+  }
+
+  _transport() {
+    if (this.transporter) return this.transporter;
+    const { host, port, secure, user, pass } = this.config.mailer.smtp;
+    if (!host) throw new Error('MAILER_SMTP_HOST is required for the smtp provider.');
+    const nodemailer = require('nodemailer');
+    this.transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: user ? { user, pass } : undefined,
+    });
+    return this.transporter;
+  }
+
+  async send({ to, subject, html }) {
+    const info = await this._transport().sendMail({ from: this.config.mailer.from, to, subject, html });
+    return { id: info.messageId, provider: 'smtp' };
+  }
+
+  async verify() {
+    await this._transport().verify();
+    return true;
   }
 }
 
 function createMailer(config) {
   switch ((config.mailer.provider || 'dev').toLowerCase()) {
+    case 'smtp':
+      return new SmtpMailer(config);
     case 'resend':
       return new ResendMailer(config);
     case 'sendgrid':
@@ -78,4 +117,4 @@ function createMailer(config) {
   }
 }
 
-module.exports = { createMailer, DevMailer, ResendMailer, SendgridMailer };
+module.exports = { createMailer, DevMailer, ResendMailer, SendgridMailer, SmtpMailer };

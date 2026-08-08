@@ -45,8 +45,11 @@ function resolveConfigPath(args = process.argv.slice(2)) {
 }
 
 function resolveSourceFilter(args = process.argv.slice(2)) {
-  const i = args.indexOf('--source');
-  return i >= 0 && args[i + 1] ? args[i + 1] : null;
+  const names = [];
+  args.forEach((arg, i) => {
+    if (arg === '--source' && args[i + 1]) names.push(args[i + 1]);
+  });
+  return names;
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -61,15 +64,15 @@ async function main(argv = process.argv.slice(2)) {
   }
   const config = await fs.readJson(configPath);
 
-  const onlySource = resolveSourceFilter(argv);
+  const onlySources = resolveSourceFilter(argv);
   const backupSources = (config.backup.sources || []).filter(
-    (s) => s.operation === 'backup' && s.enabled !== false && (!onlySource || s.name === onlySource)
+    (s) => s.operation === 'backup' && s.enabled !== false && (onlySources.length === 0 || onlySources.includes(s.name))
   );
-  if (onlySource) {
+  if (onlySources.length) {
     if (backupSources.length === 0) {
-      throw new Error(`No enabled backup source named '${onlySource}' was found.`);
+      throw new Error(`No enabled backup source named '${onlySources.join("', '")}' was found.`);
     }
-    logger.info(`Backing up only source '${onlySource}'.`);
+    logger.info(`Backing up only: ${backupSources.map((s) => s.name).join(', ')}.`);
   }
 
   const requiresDriveService = backupSources.some((source) => {
@@ -87,6 +90,7 @@ async function main(argv = process.argv.slice(2)) {
   const keepDays = (config.retention && config.retention.keepDailyBackups) || 30;
   const concurrency = (config.backup && config.backup.concurrency) || 8;
   const startTime = Date.now();
+  let currentSource = null;
   const overall = {
     totalFilesProcessed: 0,
     totalChunks: 0,
@@ -105,6 +109,8 @@ async function main(argv = process.argv.slice(2)) {
     }
 
     for (const source of backupSources) {
+      currentSource = source;
+      const sourceStarted = Date.now();
       // A source may protect one folder (`sourcePath`) or several (`sourcePaths`,
       // each a path string or { path, label }).
       const sourceFolders = Array.isArray(source.sourcePaths) && source.sourcePaths.length
@@ -180,6 +186,20 @@ async function main(argv = process.argv.slice(2)) {
           `${stats.newChunks} new chunks, ${(stats.newBytesStored / MB).toFixed(2)} MB uploaded | ` +
           `GC kept ${gc.keptSnapshots} snapshots, removed ${gc.deletedChunks} orphan chunks`
       );
+
+      if (config.email) {
+        const sourceResult = {
+          totalFilesProcessed: stats.fileCount,
+          totalChunks: stats.totalChunks,
+          totalNewChunks: stats.newChunks,
+          totalNewBytes: stats.newBytesStored,
+          totalSize: stats.totalBytes,
+          duration: Date.now() - sourceStarted,
+          sources: [{ name: source.name, storageLabel, ...stats, gc, link }],
+          driveLinks: link ? [{ name: source.name, folderName: source.backupFolderName, operation: 'backup', link }] : [],
+        };
+        await sendReport({ config, status: 'success', result: sourceResult, source });
+      }
     }
 
     overall.duration = Date.now() - startTime;
@@ -190,17 +210,13 @@ async function main(argv = process.argv.slice(2)) {
         `${overall.totalNewChunks} new chunks, ${(overall.totalNewBytes / MB).toFixed(2)} MB uploaded`
     );
 
-    if (config.email) {
-      await sendReport({ config, status: 'success', result: overall });
-    }
-
     return overall;
   } catch (error) {
     overall.duration = Date.now() - startTime;
     overall.success = false;
     logger.error('VERSIONED backup failed:', error);
     if (config.email) {
-      await sendReport({ config, status: 'failure', result: overall, error });
+      await sendReport({ config, status: 'failure', result: overall, error, source: currentSource });
     }
     throw error;
   }

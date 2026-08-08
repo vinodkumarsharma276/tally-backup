@@ -61,6 +61,7 @@ async function migrateConfigSecrets(config, configPath, { removeLegacyFiles = tr
   let metadataChanged = false;
 
   await migrateField(next.email?.smtp?.auth, 'pass', `${scope}.email.smtp.password`, migrated);
+  await migrateField(next.email?.relay, 'licenseKey', `${scope}.email.relay.licenseKey`, migrated);
 
   for (const [profileName, profile] of Object.entries(next.storageProfiles || {})) {
     if (!profile.secretId) {
@@ -134,6 +135,7 @@ async function secretStatus(config) {
 async function sanitizeConfigForRenderer(config) {
   const sanitized = clone(config);
   if (sanitized.email?.smtp?.auth) sanitized.email.smtp.auth.pass = '';
+  if (sanitized.email?.relay && 'licenseKey' in sanitized.email.relay) sanitized.email.relay.licenseKey = '';
   for (const profile of Object.values(sanitized.storageProfiles || {})) {
     if (profile.auth) {
       if ('password' in profile.auth) profile.auth.password = '';
@@ -173,6 +175,13 @@ async function secureConfigFromRenderer(submittedConfig, previousConfig, configP
     previousConfig.email?.smtp?.auth,
     'pass',
     `${scope}.email.smtp.password`,
+    changed
+  );
+  await storeOrPreserve(
+    next.email?.relay,
+    previousConfig.email?.relay,
+    'licenseKey',
+    `${scope}.email.relay.licenseKey`,
     changed
   );
 

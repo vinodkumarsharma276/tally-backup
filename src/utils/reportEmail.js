@@ -29,19 +29,30 @@ function resolveRelayIdentity(config) {
 }
 
 /**
+ * Recipients for a run: the source's own list when set, otherwise the global one.
+ */
+function recipientsFor(config, source) {
+  const raw = (source && source.notifyTo) || (config.email && config.email.to) || [];
+  const list = Array.isArray(raw) ? raw : String(raw).split(',');
+  return [...new Set(list.map((value) => String(value).trim()).filter(Boolean))];
+}
+
+/**
  * Send a backup report. In `company` mode the report is rendered locally and
  * handed to the control plane, which sends it FROM the company address (no email
  * credentials on the client). Otherwise the legacy SMTP path is used.
  */
-async function sendReport({ config, status, result, error }) {
+async function sendReport({ config, status, result, error, source }) {
   const email = config && config.email;
   if (!email || !email.enabled) return;
   if (status === 'success' && email.sendOnSuccess === false) return;
   if (status === 'failure' && email.sendOnFailure === false) return;
 
+  const recipients = recipientsFor(config, source);
+
   if (email.mode === 'company') {
-    if (!email.to) {
-      logger.warn('Company email is enabled but no recipient (email.to) is set; skipping report.');
+    if (recipients.length === 0) {
+      logger.warn('Company email is enabled but no recipient is configured; skipping report.');
       return;
     }
     const identity = resolveRelayIdentity(config);
@@ -59,13 +70,14 @@ async function sendReport({ config, status, result, error }) {
     const normalized = svc.normalizeResult(result, result && result.driveLinks);
     let html;
     let subject;
+    const label = source && source.name ? ` (${source.name})` : '';
     if (status === 'failure') {
       normalized.error = (error && error.message) || String(error || 'Unknown error');
       html = svc.generateReportEmail('failure', normalized);
-      subject = `${email.subject || 'Backup Genie Report'} — Backup failed`;
+      subject = `${email.subject || 'Backup Genie Report'}${label} — Backup failed`;
     } else {
       html = svc.generateReportEmail('success', normalized);
-      subject = `${email.subject || 'Backup Genie Report'} — Backup successful`;
+      subject = `${email.subject || 'Backup Genie Report'}${label} — Backup successful`;
     }
 
     const client = new ManagedControlPlaneClient({
@@ -73,20 +85,22 @@ async function sendReport({ config, status, result, error }) {
       tenantId: identity.tenantId,
       licenseKey,
     });
-    try {
-      await client.sendEmailReport({ to: email.to, subject, html });
-      logger.info(`Report email sent via company relay to ${email.to}`);
-    } catch (sendError) {
-      logger.warn(`Company relay email failed: ${sendError.message}`);
+    for (const to of recipients) {
+      try {
+        await client.sendEmailReport({ to, subject, html });
+        logger.info(`Report email sent via company relay to ${to}`);
+      } catch (sendError) {
+        logger.warn(`Company relay email to ${to} failed: ${sendError.message}`);
+      }
     }
     return;
   }
 
   // Legacy customer-provided SMTP path.
-  const svc = new EmailService(email);
+  const svc = new EmailService({ ...email, to: recipients.join(', ') });
   await svc.initialize();
   if (status === 'failure') await svc.sendBackupFailure(error, result);
   else await svc.sendBackupSuccessWithMultipleLinks(result, result && result.driveLinks);
 }
 
-module.exports = { sendReport, resolveRelayIdentity };
+module.exports = { sendReport, resolveRelayIdentity, recipientsFor };

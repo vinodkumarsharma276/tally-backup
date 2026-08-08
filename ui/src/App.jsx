@@ -203,7 +203,7 @@ function addFolder(list) {
   return foldersPatch([...list, { path: '', label: '' }]);
 }
 
-function Sources({ config, setConfig, chooseDirectory }) {
+function Sources({ config, setConfig, chooseDirectory, googleAccount }) {
   const sources = config.backup?.sources || [];
   const profiles = Object.keys(config.storageProfiles || {});
   const update = (index, patch) => setConfig((current) => ({
@@ -288,6 +288,46 @@ function Sources({ config, setConfig, chooseDirectory }) {
               <Button variant="secondary" onClick={async () => { const selected = await chooseDirectory(source.sourcePath); if (selected) update(index, { sourcePath: selected }); }}>Browse</Button>
             </div>
           )}
+          {source.operation === 'backup' && (
+            <div className="subpanel">
+              <div className="form-grid">
+                <SelectField
+                  label="Schedule"
+                  value={SCHEDULE_PRESETS.some(([v]) => v === source.schedule) ? source.schedule : (source.schedule ? 'custom' : '')}
+                  onChange={(event) => update(index, { schedule: event.target.value === 'custom' ? (source.schedule || '0 20 * * *') : event.target.value })}
+                >
+                  <option value="">Use the global schedule</option>
+                  {SCHEDULE_PRESETS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  <option value="custom">Custom…</option>
+                </SelectField>
+                {source.schedule && (
+                  <Field label="Cron expression" value={source.schedule} onChange={(event) => update(index, { schedule: event.target.value })} hint="minute hour day month weekday" />
+                )}
+              </div>
+            </div>
+          )}
+          <div className="subpanel">
+            <span className="field-label">Email reports for this source</span>
+            {(source.notifyTo || []).map((address, ri) => (
+              <div className="folder-row" key={`notify-${ri}`}>
+                <Field
+                  label={ri === 0 ? 'Send to' : `Send to ${ri + 1}`}
+                  value={address}
+                  onChange={(event) => update(index, { notifyTo: (source.notifyTo || []).map((a, i) => (i === ri ? event.target.value : a)) })}
+                />
+                <Button variant="danger-ghost" onClick={() => update(index, { notifyTo: (source.notifyTo || []).filter((_, i) => i !== ri) })}>Remove</Button>
+              </div>
+            ))}
+            <div className="notify-actions">
+              <Button variant="ghost" onClick={() => update(index, { notifyTo: [...(source.notifyTo || []), ''] })}>+ Add recipient</Button>
+              {googleAccount?.email && !(source.notifyTo || []).includes(googleAccount.email) && (
+                <Button variant="ghost" onClick={() => update(index, { notifyTo: [...(source.notifyTo || []), googleAccount.email] })}>+ Add {googleAccount.email}</Button>
+              )}
+            </div>
+            {(source.notifyTo || []).length === 0 && (
+              <span className="field-hint">No recipients — reports for this source fall back to the address in Settings.</span>
+            )}
+          </div>
           {source.operation === 'restore' && (
             <div className="subpanel">
               <div className="form-grid three">
@@ -314,7 +354,59 @@ const publicProfileFields = {
   managed: [['controlPlaneUrl', 'Control plane URL'], ['tenantId', 'Account / tenant ID']],
 };
 
-function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile, notify }) {
+// Seeds the fields a provider needs so a profile can't be saved half-configured.
+function providerDefaults(type, profileName, profile) {
+  const patch = { type };
+  if (type === 'google_drive' && !profile.rootFolderName) patch.rootFolderName = profileName || 'Backup Genie';
+  if (type === 's3' && !profile.prefix) patch.prefix = 'backup-genie';
+  if (type === 'azure_blob' && !profile.auth?.mode) patch.auth = { ...(profile.auth || {}), mode: 'interactive' };
+  return patch;
+}
+
+const requiredProfileFields = {
+  google_drive: ['rootFolderName'],
+  local: ['rootDir'],
+  network: ['rootDir'],
+  s3: ['bucket', 'region'],
+  azure_blob: ['accountUrl', 'containerName'],
+  managed: ['controlPlaneUrl', 'tenantId'],
+};
+
+function missingProfileFields(profile) {
+  return (requiredProfileFields[profile.type] || []).filter((key) => !String(profile[key] || '').trim());
+}
+
+function profileFacts(profile, googleAccount) {
+  const facts = [];
+  const prefix = profile.prefix || profile.rootPrefix;
+  if (profile.type === 'google_drive') {
+    facts.push(['Account', googleAccount?.email || 'Not connected']);
+    facts.push(['Drive folder', profile.rootFolderName || '—']);
+    if (googleAccount?.quotaLimit) {
+      facts.push(['Drive storage', `${bytes(googleAccount.quotaUsed)} of ${bytes(googleAccount.quotaLimit)} used`]);
+    }
+  } else if (profile.type === 'local' || profile.type === 'network') {
+    facts.push(['Location', profile.rootDir || '—']);
+    if (profile.auth?.username) facts.push(['Signs in as', profile.auth.username]);
+  } else if (profile.type === 's3') {
+    facts.push(['Bucket', profile.bucket || '—']);
+    facts.push(['Region', profile.region || '—']);
+    if (profile.endpoint) facts.push(['Endpoint', profile.endpoint]);
+    if (prefix) facts.push(['Path prefix', prefix]);
+  } else if (profile.type === 'azure_blob') {
+    facts.push(['Storage account', profile.accountName || profile.accountUrl || '—']);
+    facts.push(['Container', profile.containerName || '—']);
+    facts.push(['Sign-in', { interactive: 'Microsoft sign-in', default: 'Azure default credential', managed_identity: 'Managed identity', sas: 'SAS token' }[profile.auth?.mode || 'interactive']]);
+    if (profile.auth?.loginHint) facts.push(['Account', profile.auth.loginHint]);
+    if (prefix) facts.push(['Path prefix', prefix]);
+  } else if (profile.type === 'managed') {
+    facts.push(['Service', profile.controlPlaneUrl || '—']);
+    facts.push(['Account ID', profile.tenantId || '—']);
+  }
+  return facts;
+}
+
+function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile, notify, googleAccount }) {
   const profiles = config.storageProfiles || {};
   const secretStatus = config._secretStatus || { storageProfiles: {} };
   const usedBy = (name) => (config.backup?.sources || []).filter((source) => source.storageProfile === name).map((source) => source.name);
@@ -370,7 +462,7 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleA
             <div className="storage-head"><div className={`provider-logo provider-${profile.type}`}>{profile.type === 'google_drive' ? 'G' : profile.type === 'azure_blob' ? 'A' : profile.type === 's3' ? 'S3' : profile.type === 'network' ? 'N' : profile.type === 'managed' ? 'VE' : 'L'}</div><div><h3>{name}</h3><span>{storageName(profile.type)}</span></div><Pill tone={profile.tenancy === 'managed' ? 'violet' : 'neutral'}>{profile.tenancy || 'customer'}</Pill></div>
             <div className="form-grid">
               <Field label="Profile name" defaultValue={name} onBlur={(event) => rename(name, event.target.value.trim())} />
-              <SelectField label="Provider" value={profile.type} onChange={(event) => update(name, { type: event.target.value })}>
+              <SelectField label="Provider" value={profile.type} onChange={(event) => update(name, providerDefaults(event.target.value, name, profile))}>
                 <option value="google_drive">Google Drive</option><option value="local">Local folder</option><option value="network">Network / NAS</option><option value="s3">S3 compatible</option><option value="azure_blob">Azure Blob</option><option value="managed">Managed cloud</option>
               </SelectField>
             </div>
@@ -384,6 +476,18 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleA
             {profile.type === 's3' && <div className="form-grid secret-fields"><Field type="password" label="Access key ID" value={profile.auth?.accessKeyId || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter access key'} onChange={(event) => updateAuth(name, { accessKeyId: event.target.value })} /><Field type="password" label="Secret access key" value={profile.auth?.secretAccessKey || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter secret key'} onChange={(event) => updateAuth(name, { secretAccessKey: event.target.value })} /></div>}
             {profile.type === 'managed' && <div className="form-grid secret-fields"><Field type="password" label="License key" value={profile.auth?.licenseKey || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter license key'} onChange={(event) => updateAuth(name, { licenseKey: event.target.value })} /></div>}
             {profile.type === 'azure_blob' && <><SelectField label="Azure authentication" value={profile.auth?.mode || 'interactive'} onChange={(event) => updateAuth(name, { mode: event.target.value })}><option value="interactive">Microsoft interactive sign-in</option><option value="default">Azure development credential</option><option value="managed_identity">Managed identity</option><option value="sas">SAS token</option></SelectField>{profile.auth?.mode === 'sas' && <Field type="password" label="SAS token" value={profile.auth?.sasToken || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter SAS token'} onChange={(event) => updateAuth(name, { sasToken: event.target.value })} />}</>}
+            {missingProfileFields(profile).length > 0 && (
+              <div className="profile-warning">
+                <span>!</span>
+                This profile is incomplete — backups using it will fail. Fill in: {missingProfileFields(profile).map((key) => (publicProfileFields[profile.type] || []).find(([k]) => k === key)?.[1] || key).join(', ')}.
+              </div>
+            )}
+            <dl className="storage-facts">
+              {profileFacts(profile, googleAccount).map(([label, value]) => (
+                <div key={label}><dt>{label}</dt><dd title={String(value)}>{value}</dd></div>
+              ))}
+              <div><dt>Used by</dt><dd>{usedBy(name).length ? usedBy(name).join(', ') : 'No sources yet'}</dd></div>
+            </dl>
             <div className={cx('credential-note', (profile.type === 'google_drive' ? secretStatus.googleToken : secretStatus.storageProfiles?.[name]) && 'credential-stored')}>
               <span>{(profile.type === 'google_drive' ? secretStatus.googleToken : secretStatus.storageProfiles?.[name]) ? '✓' : '○'}</span>
               {profile.type === 'google_drive'
@@ -394,7 +498,7 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleA
             </div>
             <div className="card-footer storage-actions">
               <Button variant="danger-ghost" onClick={() => removeProfile(name)}>Remove</Button>
-              <Button variant="secondary" busy={testingProfile === name} onClick={() => testStorage(name)}>Test connection</Button>
+              <Button variant="secondary" busy={testingProfile === name} disabled={missingProfileFields(profile).length > 0} onClick={() => testStorage(name)}>Test connection</Button>
               {profile.type === 'google_drive' && <Button variant="ghost" onClick={startGoogleAuth}>Connect Google</Button>}
             </div>
           </article>
@@ -906,6 +1010,11 @@ export default function App() {
   const [showWizard, setShowWizard] = useState(false);
   const [updateState, setUpdateState] = useState({ status: 'idle' });
   const [theme, setTheme] = useState(() => localStorage.getItem('bg-theme') || 'dark');
+  const [googleAccount, setGoogleAccount] = useState(null);
+
+  const refreshGoogleAccount = () => {
+    Promise.resolve(api.getGoogleAccount?.()).then((info) => setGoogleAccount(info || null)).catch(() => {});
+  };
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -931,6 +1040,7 @@ export default function App() {
         if (!configResult.config.onboarding?.completed) setShowWizard(true);
       })
       .catch((error) => notify(error.message, 'error'));
+    refreshGoogleAccount();
     const unsubProgress = api.onProgress((payload) => setProgress(payload));
     const unsubLog = api.onOperationLog((payload) => setOperationLogs((current) => [...current.slice(-249), payload.line]));
     const unsubState = api.onOperationState((state) => {
@@ -941,12 +1051,21 @@ export default function App() {
       } else {
         notify(state.status === 'success' ? 'Operation completed successfully.' : 'Operation failed. Check Activity logs.', state.status === 'success' ? 'success' : 'error');
         api.getLogs(180).then(setLogs);
+        refreshGoogleAccount();
       }
     });
     const unsubScheduler = api.onSchedulerState((state) => setSchedulerState(state));
     const unsubUpdate = api.onUpdateState((state) => setUpdateState(state));
-    return () => { unsubProgress(); unsubLog(); unsubState(); unsubScheduler(); unsubUpdate(); };
+    const unsubAuth = api.onAuthState?.((state) => {
+      notify(state.status === 'success' ? 'Google account connected.' : 'Google sign-in did not complete.', state.status === 'success' ? 'success' : 'error');
+      refreshGoogleAccount();
+    });
+    return () => { unsubProgress(); unsubLog(); unsubState(); unsubScheduler(); unsubUpdate(); unsubAuth?.(); };
   }, []);
+
+  useEffect(() => {
+    if (page === 'storage') refreshGoogleAccount();
+  }, [page]);
 
   useEffect(() => {
     if (!config) return;
@@ -1005,6 +1124,7 @@ export default function App() {
       await persistIfNeeded();
       const result = await api.testStorage(name);
       notify(`${storageName(result.profileType)} connection successful.`);
+      if (result.profileType === 'google_drive') refreshGoogleAccount();
     } catch (error) { notify(error.message, 'error'); }
     finally { setTestingProfile(''); }
   };
@@ -1045,8 +1165,8 @@ export default function App() {
 
   let content;
   if (page === 'overview') content = <Overview {...{ config, operation, progress, operationLogs, startBackup, cancelOperation: api.cancelOperation, setPage }} />;
-  if (page === 'sources') content = <Sources {...{ config, setConfig, chooseDirectory }} />;
-  if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile, notify }} />;
+  if (page === 'sources') content = <Sources {...{ config, setConfig, chooseDirectory, googleAccount }} />;
+  if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile, notify, googleAccount }} />;
   if (page === 'restore') content = <Restore {...{ config, snapshots, snapshotsMeta, loadSnapshots, startRestore, chooseDirectory, operation }} />;
   if (page === 'logs') content = <Logs {...{ logs, refreshLogs, operationLogs }} />;
   if (page === 'settings') content = <Settings {...{ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard: () => setShowWizard(true), updateState, checkForUpdates, installUpdate }} />;

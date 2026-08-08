@@ -93,6 +93,16 @@ async function main() {
     check('sendReport relays a rendered report', mailer.sent.length === before + 1 && relayed.to === 'owner@example.com');
     check('report subject reflects success', /Backup successful/.test(relayed.subject));
     check('report html is versioned template', /Deduplication saved|restore point/i.test(relayed.html));
+
+    // Provider selection: swapping vendors is config-only.
+    const { createMailer, SmtpMailer, ResendMailer } = require('../src/mailer');
+    const smtpConfig = loadConfig({ MAILER_PROVIDER: 'smtp', MAILER_SMTP_HOST: 'smtp-relay.brevo.com', MAILER_SMTP_USER: 'u', MAILER_SMTP_PASS: 'p' });
+    check('smtp provider selected from config', createMailer(smtpConfig) instanceof SmtpMailer);
+    check('smtp settings read from env', smtpConfig.mailer.smtp.host === 'smtp-relay.brevo.com' && smtpConfig.mailer.smtp.port === 587);
+    check('resend provider still selectable', createMailer(loadConfig({ MAILER_PROVIDER: 'resend' })) instanceof ResendMailer);
+    let smtpErr = null;
+    try { await new SmtpMailer(loadConfig({ MAILER_PROVIDER: 'smtp' })).send({ to: 'a@b.com', subject: 's', html: '<p>x</p>' }); } catch (e) { smtpErr = e; }
+    check('smtp without host fails clearly', smtpErr && /MAILER_SMTP_HOST/.test(smtpErr.message));
   } finally {
     server.close();
     await store.close();

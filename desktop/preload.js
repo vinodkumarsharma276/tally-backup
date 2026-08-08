@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('tallyDesktop', {
   getSchedulerStatus: () => ipcRenderer.invoke('scheduler:status'),
   listSnapshots: (sourceName) => ipcRenderer.invoke('snapshots:list', sourceName),
   testStorage: (profileName) => ipcRenderer.invoke('storage:test', profileName),
+  getGoogleAccount: () => ipcRenderer.invoke('storage:google-account'),
   getLogs: (limit) => ipcRenderer.invoke('logs:get', limit),
   testEmail: () => ipcRenderer.invoke('email:test'),
   openPath: (targetPath) => ipcRenderer.invoke('system:open-path', targetPath),
@@ -29,5 +30,6 @@ contextBridge.exposeInMainWorld('tallyDesktop', {
   onOperationLog: (callback) => subscribe('operation:log', callback),
   onOperationState: (callback) => subscribe('operation:state', callback),
   onSchedulerState: (callback) => subscribe('scheduler:state', callback),
+  onAuthState: (callback) => subscribe('auth:state', callback),
   onUpdateState: (callback) => subscribe('update:state', callback),
 });

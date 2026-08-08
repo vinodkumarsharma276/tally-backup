@@ -75,9 +75,19 @@ function loadConfig(env = process.env) {
     mailer: {
       // How the company sends report emails FROM its own address. Credentials
       // live here on the server only, never in the desktop app.
-      provider: env.MAILER_PROVIDER || 'dev', // dev | resend | sendgrid
+      provider: env.MAILER_PROVIDER || 'dev', // dev | smtp | resend | sendgrid
       from: env.MAILER_FROM || 'Backup Genie <no-reply@backupgenie.app>',
       apiKey: env.MAILER_API_KEY || '',
+      // Optional monitoring copy of every report; disclose this in the privacy policy.
+      adminBcc: env.MAILER_ADMIN_BCC || '',
+      // Generic SMTP relay works with Brevo, Zoho, SES, Mailjet, Resend, etc.
+      smtp: {
+        host: env.MAILER_SMTP_HOST || '',
+        port: int(env.MAILER_SMTP_PORT, 587),
+        secure: bool(env.MAILER_SMTP_SECURE, false),
+        user: env.MAILER_SMTP_USER || '',
+        pass: env.MAILER_SMTP_PASS || '',
+      },
     },
     graceRetentionDays: int(env.GRACE_RETENTION_DAYS, 15),
   };

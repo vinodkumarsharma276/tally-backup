@@ -6,79 +6,11 @@
     "schedulerEnabled": true
   },
   "storageProfiles": {
-    "test-google-drive": {
+    "Chandra Google Drive": {
       "type": "google_drive",
-      "rootFolderName": "Tally Backup New",
-      "secretId": "test-google-drive"
-    },
-    "test-local-store": {
-      "type": "local",
-      "rootDir": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\temp\\local-versioned-store",
-      "secretId": "test-local-store"
-    },
-    "test-network-store": {
-      "type": "network",
-      "rootDir": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\temp\\network-versioned-store",
-      "secretId": "test-network-store"
-    },
-    "test-network-unc-example": {
-      "type": "network",
-      "rootDir": "\\\\server\\share\\tally-backup-store",
-      "auth": {
-        "username": "DOMAIN\\username"
-      },
-      "secretId": "test-network-unc-example"
-    },
-    "test-s3-example": {
-      "type": "s3",
-      "bucket": "your-bucket-name",
-      "region": "ap-south-1",
-      "prefix": "tally-backup-store",
-      "endpoint": "https://s3.ap-south-1.amazonaws.com",
-      "forcePathStyle": false,
-      "auth": {},
-      "secretId": "test-s3-example"
-    },
-    "test-s3-env-example": {
-      "type": "s3",
-      "bucket": "your-real-bucket-name",
-      "region": "ap-south-1",
-      "prefix": "tally-backup-store",
-      "endpoint": "https://s3.ap-south-1.amazonaws.com",
-      "forcePathStyle": false,
-      "auth": {},
-      "secretId": "test-s3-env-example"
-    },
-    "test-azure-blob-customer": {
-      "type": "azure_blob",
-      "tenancy": "customer",
-      "accountName": "vetallybackup",
-      "accountUrl": "https://vetallybackup.blob.core.windows.net",
-      "containerName": "tally-backup-test",
-      "prefix": "customer-owned-test",
-      "auth": {
-        "mode": "interactive",
-        "tenantId": "971230f0-fba1-4212-a303-27e13573b25e",
-        "loginHint": "vinodkumarsharma276@gmail.com"
-      },
-      "secretId": "test-azure-blob-customer"
-    },
-    "test-azure-blob-managed": {
-      "type": "azure_blob",
-      "tenancy": "managed",
-      "accountName": "vetallybackup",
-      "accountUrl": "https://vetallybackup.blob.core.windows.net",
-      "containerName": "tally-backup-test",
-      "prefix": "managed-test/tenant-local-dev",
-      "auth": {
-        "mode": "sas"
-      },
-      "secretId": "test-azure-blob-managed"
-    },
-    "primary": {
-      "type": "google_drive",
-      "secretId": "primary",
-      "rootFolderName": "Backup Genie"
+      "rootDir": "",
+      "secretId": "new-local-storage",
+      "rootFolderName": "Tally Bakcup"
     }
   },
   "backup": {
@@ -88,7 +20,16 @@
         "enabled": true,
         "operation": "backup",
         "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\Tally Data Day1",
-        "storageProfile": "primary"
+        "storageProfile": "Chandra Google Drive",
+        "notifyTo": [
+          "vinodipdelhi@gmail.com"
+        ],
+        "sourcePaths": [
+          {
+            "path": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\Tally Data Day1",
+            "label": ""
+          }
+        ]
       }
     ],
     "schedule": "0 20 * * *",
@@ -120,7 +61,13 @@
     "maxSize": "10m"
   },
   "email": {
-    "enabled": false,
+    "enabled": true,
+    "mode": "company",
+    "relay": {
+      "controlPlaneUrl": "http://localhost:8787",
+      "tenantId": "demo-tenant",
+      "licenseKey": "DEMO-LICENSE-KEY-123"
+    },
     "smtp": {
       "host": "smtp.gmail.com",
       "port": 587,
@@ -132,12 +79,11 @@
     },
     "from": "vinodkhoraa@gmail.com",
     "to": "vinodipdelhi@gmail.com",
-    "subject": "Tally Backup Report",
+    "subject": "Backup Genie Report",
     "sendOnSuccess": true,
     "sendOnFailure": true,
     "includeStats": true,
-    "includeDriveLink": true,
-    "mode": "company"
+    "includeDriveLink": true
   },
   "onboarding": {
     "completed": true,

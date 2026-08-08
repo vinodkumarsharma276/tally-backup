@@ -163,12 +163,22 @@ async function createBackend({ config, source, driveService, flags = {} }) {
 
   if (profile.type === 'google_drive') {
     if (!driveService) throw new Error('Google Drive backend requires an initialized GoogleDriveService.');
+    // Fall back to the profile's own name so a profile saved without an explicit
+    // Drive folder still works instead of failing at backup time.
+    const rootFolderName =
+      profile.rootFolderName ||
+      profile.rootPath ||
+      (source && source.backupFolderName) ||
+      flags.rootFolderName ||
+      profile.name;
+    if (!rootFolderName) {
+      throw new Error(
+        `Storage profile '${profile.name || profileName}' needs a Drive folder name. ` +
+          'Open Storage and set "Drive folder".'
+      );
+    }
     const backend = new GoogleDriveBackend(driveService, {
-      rootFolderName:
-        profile.rootFolderName ||
-        profile.rootPath ||
-        (source && source.backupFolderName) ||
-        flags.rootFolderName,
+      rootFolderName,
       allowMixed: !!profile.allowMixed || !!flags.allowMixed,
     });
     await backend.init();

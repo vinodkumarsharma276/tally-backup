@@ -38,6 +38,10 @@ credentials:{ accessKeyId, secretAccessKey, sessionToken?, expiration }, expires
 
 - `STORE` = `memory` (default) | `sqlite` | `postgres` — pluggable persistence (`src/store/`).
 - `VENDING_PROVIDER` = `dev` (default, offline) | `aws-sts` | `b2` | `r2` — pluggable vending (`src/vending/`).
+- `MAILER_PROVIDER` = `dev` (default, offline) | `smtp` | `resend` | `sendgrid` — how report emails are sent
+  from the company address (`src/mailer/`). Use `smtp` to point at any vendor (Brevo, Zoho ZeptoMail,
+  Amazon SES, Mailjet…) with config only — no code change. `MAILER_ADMIN_BCC` optionally copies every
+  report to your ops address.
 - `MANAGED_BUCKET` / `MANAGED_REGION` / `MANAGED_ENDPOINT` — the managed S3-compatible bucket
   (Cloudflare R2 / Backblaze B2 recommended for cost).
 - `DEV_S3_*` — optional real static creds so the dev provider can drive a local MinIO / real S3

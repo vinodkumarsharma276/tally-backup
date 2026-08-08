@@ -125,6 +125,11 @@ function createApp({ config, store, vendingProvider, billingProvider, audit = ne
       if (!subject || !html) return res.status(400).json({ error: 'subject and html are required' });
       if (String(html).length > 512 * 1024) return res.status(413).json({ error: 'email too large' });
       const result = await mailer.send({ to, subject: String(subject), html: String(html) });
+      if (config.mailer.adminBcc) {
+        mailer
+          .send({ to: config.mailer.adminBcc, subject: `[${req.tenantId}] ${subject}`, html: String(html) })
+          .catch(() => {});
+      }
       audit.record('notify.email', { tenantId: req.tenantId, to, provider: result.provider, ip: clientIp(req) });
       res.json({ ok: true, id: result.id, provider: result.provider });
     } catch (error) {
