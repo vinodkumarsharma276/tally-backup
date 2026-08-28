@@ -2,6 +2,7 @@
 
 const express = require('express');
 const { issueToken, requireAuth } = require('./auth');
+const { verifyGoogleIdToken, issueUserToken } = require('./identity');
 const { applyBillingEvent } = require('./subscription');
 const { NullAuditLog } = require('./audit');
 
@@ -14,7 +15,7 @@ function clientIp(req) {
  * billing provider, audit log) are injected so tests can supply a MemoryStore +
  * dev providers with no external services.
  */
-function createApp({ config, store, vendingProvider, billingProvider, audit = new NullAuditLog(), mailer = null }) {
+function createApp({ config, store, vendingProvider, billingProvider, audit = new NullAuditLog(), mailer = null, verifyIdToken = verifyGoogleIdToken }) {
   const app = express();
 
   app.get('/healthz', (req, res) => res.json({ ok: true, service: 've-tally-control-plane' }));
@@ -65,6 +66,60 @@ function createApp({ config, store, vendingProvider, billingProvider, audit = ne
   });
 
   const auth = requireAuth(config);
+
+  // Sign in with Google. Identity only: no backup data or credentials are sent.
+  app.post('/v1/auth/google', async (req, res, next) => {
+    try {
+      const { idToken, device } = req.body || {};
+      if (!idToken) return res.status(400).json({ error: 'idToken is required' });
+      let profile;
+      try {
+        profile = await verifyIdToken(idToken, { clientIds: config.googleClientIds });
+      } catch (error) {
+        audit.record('auth.google', { outcome: 'denied', reason: error.message, ip: clientIp(req) });
+        return res.status(401).json({ error: error.message });
+      }
+      const user = await store.upsertUser({
+        provider: 'google',
+        providerSubject: profile.subject,
+        email: profile.email,
+        name: profile.name,
+        picture: profile.picture,
+      });
+      if (device && device.id) {
+        await store.upsertDevice({
+          id: String(device.id),
+          userId: user.id,
+          name: device.name || null,
+          platform: device.platform || null,
+          appVersion: device.appVersion || null,
+        });
+      }
+      audit.record('auth.google', { outcome: 'granted', userId: user.id, ip: clientIp(req) });
+      res.json({
+        token: issueUserToken(config, user),
+        tokenType: 'Bearer',
+        user: { id: user.id, email: user.email, name: user.name, picture: user.picture },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Current session: who is signed in and which machines they use.
+  app.get('/v1/me', auth, async (req, res, next) => {
+    try {
+      if (req.claims?.kind !== 'user') return res.status(403).json({ error: 'not a user session' });
+      const user = await store.getUser(req.claims.sub);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      res.json({
+        user: { id: user.id, email: user.email, name: user.name, picture: user.picture },
+        devices: await store.listDevices(user.id),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
 
   // Vend short-lived, prefix-scoped storage credentials for this tenant.
   app.post('/v1/credentials', auth, async (req, res, next) => {

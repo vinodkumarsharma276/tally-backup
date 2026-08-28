@@ -6,29 +6,47 @@
     "schedulerEnabled": true
   },
   "storageProfiles": {
-    "Chandra Google Drive": {
+    "vinodipdelhi Google Drive": {
       "type": "google_drive",
-      "rootDir": "",
-      "secretId": "new-local-storage",
-      "rootFolderName": "Tally Bakcup"
+      "rootFolderName": "LLM engineering",
+      "secretId": "vinodipdelhi_Google_Drive",
+      "keepDailyBackups": 7
+    },
+    "Chandra Drive": {
+      "type": "google_drive",
+      "rootFolderName": "LLM Engineering",
+      "secretId": "LLM_Engineering",
+      "keepDailyBackups": 10
+    },
+    "Tally Local Storage": {
+      "type": "local",
+      "rootDir": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\SecondaryBackup",
+      "secretId": "Tally_Local_Storage"
     }
   },
   "backup": {
     "sources": [
       {
-        "name": "Tally Backup",
+        "name": "LLM Engineering",
         "enabled": true,
         "operation": "backup",
-        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\Tally Data Day1",
-        "storageProfile": "Chandra Google Drive",
-        "notifyTo": [
-          "vinodipdelhi@gmail.com"
+        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
+        "storageProfile": "vinodipdelhi Google Drive",
+        "storageProfiles": [
+          "vinodipdelhi Google Drive",
+          "Chandra Drive",
+          "Tally Local Storage"
         ],
         "sourcePaths": [
           {
-            "path": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\Tally Data Day1",
+            "path": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
             "label": ""
           }
+        ],
+        "schedule": "32 22 * * *",
+        "schedules": [
+          "32 22 * * *",
+          "20 23 * * *"
         ]
       }
     ],
@@ -66,7 +84,7 @@
     "relay": {
       "controlPlaneUrl": "http://localhost:8787",
       "tenantId": "demo-tenant",
-      "licenseKey": "DEMO-LICENSE-KEY-123"
+      "licenseKey": "secret:config_test.email.relay.licenseKey"
     },
     "smtp": {
       "host": "smtp.gmail.com",

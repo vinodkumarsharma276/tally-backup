@@ -129,6 +129,7 @@ class EmailService {
       totalChunks,
       newChunks,
       dedupPercent: totalChunks > 0 ? Math.max(0, Math.min(100, (1 - newChunks / totalChunks) * 100)) : 0,
+      restorePoints: sources.reduce((max, s) => Math.max(max, Number(s.gc?.keptSnapshots || 0)), 0) || 1,
       duration: Number(r.duration || 0),
       sources,
       links: links.filter((link) => link && link.link),
@@ -169,23 +170,37 @@ class EmailService {
 
   summaryGrid(data) {
     const noChange = data.newChunks === 0;
+    const firstBackup = data.dedupPercent < 1 && data.newChunks > 0;
+    // newBytes is what actually left the machine: new chunks after compression.
+    const savedPercent = data.totalBytes > 0 ? Math.max(0, (1 - data.newBytes / data.totalBytes) * 100) : 0;
+    let message;
+    if (noChange) {
+      message = 'No changes were detected since the last backup. A new restore point was recorded and your data is fully protected.';
+    } else if (firstBackup) {
+      message =
+        `First backup of this data: all <strong>${this.formatBytes(data.totalBytes)}</strong> was protected, ` +
+        `uploading <strong>${this.formatBytes(data.newBytes)}</strong> after compression ` +
+        `(${savedPercent.toFixed(0)}% smaller). Future backups will send only what changes.`;
+    } else {
+      message =
+        `A new restore point was created. Only <strong>${this.formatBytes(data.newBytes)}</strong> had to be uploaded ` +
+        `out of ${this.formatBytes(data.totalBytes)} — the rest was already stored.`;
+    }
     return `
       <table style="width:100%;border-collapse:separate;border-spacing:0;margin:0 -6px;">
         <tr>
           ${this.statTile('Files protected', String(data.filesProtected), COLORS.text)}
-          ${this.statTile('New data uploaded', this.formatBytes(data.newBytes), COLORS.accent)}
-          ${this.statTile('Total data size', this.formatBytes(data.totalBytes), COLORS.text)}
+          ${this.statTile('Data protected', this.formatBytes(data.totalBytes), COLORS.text)}
+          ${this.statTile('Uploaded', this.formatBytes(data.newBytes), COLORS.accent)}
         </tr>
         <tr>
-          ${this.statTile('Deduplication saved', `${data.dedupPercent.toFixed(1)}%`, COLORS.accent)}
+          ${this.statTile('Upload saved', `${savedPercent.toFixed(0)}%`, COLORS.accent)}
           ${this.statTile('Duration', this.formatDuration(data.duration), COLORS.text)}
-          ${this.statTile('Restore points', String(data.sources.length ? data.sources.length : 1), COLORS.text)}
+          ${this.statTile('Restore points kept', String(data.restorePoints), COLORS.text)}
         </tr>
       </table>
       <div style="margin-top:16px;background:${noChange ? 'rgba(230,162,60,.08)' : 'rgba(43,188,127,.08)'};border-left:4px solid ${noChange ? COLORS.warn : COLORS.accent};border-radius:8px;padding:13px 15px;color:${COLORS.text};font-size:13px;line-height:1.55;">
-        ${noChange
-          ? 'No changes were detected since the last backup. A new restore point was recorded and your data is fully protected.'
-          : `A new restore point was created. Only <strong>${this.formatBytes(data.newBytes)}</strong> of changed data was uploaded thanks to deduplication — the rest was already stored.`}
+        ${message}
       </div>`;
   }
 
@@ -196,19 +211,47 @@ class EmailService {
         const snapshot = source.snapshotId ? String(source.snapshotId) : '—';
         const kept =
           source.gc && source.gc.keptSnapshots !== undefined ? `${source.gc.keptSnapshots} restore points kept` : '';
+        if (source.operation === 'restore') {
+          return `
+          <div style="padding:14px 16px;border-bottom:1px solid ${COLORS.border};">
+            <div style="font-weight:700;color:${COLORS.text};font-size:14px;">↓ ${this.escape(source.name)}</div>
+            <div style="color:${COLORS.muted};font-size:12.5px;line-height:1.6;margin-top:4px;">
+              Restored to this computer: ${this.escape(source.dest || '—')}<br>
+              ${Number(source.filesWritten || 0)} files · ${this.formatBytes(source.bytesWritten || 0)}<br>
+              From restore point: <span style="font-family:monospace;color:${COLORS.text};">${this.escape(snapshot)}</span>
+            </div>
+          </div>`;
+        }
+        if (source.role === 'copy') {
+          const copied = Number(source.objectsCopied || 0);
+          return `
+          <div style="padding:14px 16px;border-bottom:1px solid ${COLORS.border};">
+            <div style="font-weight:700;color:${COLORS.text};font-size:14px;">⧉ ${this.escape(source.profileName || source.storageLabel || 'Second copy')}</div>
+            <div style="color:${COLORS.muted};font-size:12.5px;line-height:1.6;margin-top:4px;">
+              ${this.escape(source.storageLabel || '')}<br>
+              Extra copy of ${this.escape(source.mirroredFrom || 'the main destination')}<br>
+              ${copied ? `${copied} item(s) copied · ${this.formatBytes(source.newBytesStored || 0)} transferred` : 'Already up to date'}<br>
+              Holds the same ${Number(source.fileCount || 0)} files · ${this.formatBytes(source.totalBytes || 0)} total
+            </div>
+          </div>`;
+        }
+        const heading = source.role === 'primary'
+          ? `↑ ${this.escape(source.profileName || source.storageLabel || 'Storage')}`
+          : `↑ ${this.escape(source.name)}`;
         return `
           <div style="padding:14px 16px;border-bottom:1px solid ${COLORS.border};">
-            <div style="font-weight:700;color:${COLORS.text};font-size:14px;">↑ ${this.escape(source.name)}</div>
+            <div style="font-weight:700;color:${COLORS.text};font-size:14px;">${heading}</div>
             <div style="color:${COLORS.muted};font-size:12.5px;line-height:1.6;margin-top:4px;">
-              Destination: ${this.escape(source.storageLabel || 'Storage')}<br>
+              ${source.role === 'primary' ? `Main destination · ${this.escape(source.storageLabel || '')}` : `Destination: ${this.escape(source.storageLabel || 'Storage')}`}<br>
               ${Number(source.fileCount || 0)} files · ${this.formatBytes(source.newBytesStored || 0)} new · ${this.formatBytes(source.totalBytes || 0)} total<br>
               Restore point: <span style="font-family:monospace;color:${COLORS.text};">${this.escape(snapshot)}</span>${kept ? ` · ${kept}` : ''}
             </div>
           </div>`;
       })
       .join('');
+    const heading = sources.some((source) => source.role === 'copy') ? 'Where your data is stored' : 'Protected sources';
     return `
-      <h3 style="color:${COLORS.text};font-size:15px;margin:26px 0 10px;">Protected sources</h3>
+      <h3 style="color:${COLORS.text};font-size:15px;margin:26px 0 10px;">${heading}</h3>
       <div style="background:${COLORS.bg};border:1px solid ${COLORS.border};border-radius:12px;overflow:hidden;">${rows}</div>`;
   }
 
@@ -251,10 +294,15 @@ class EmailService {
     }
 
     const body = `
+      ${data.sources.some((s) => s.anomaly)
+        ? `<div style="background:rgba(230,162,60,.10);border-left:4px solid ${COLORS.warn};border-radius:8px;padding:13px 15px;color:${COLORS.text};font-size:13px;line-height:1.55;margin-bottom:16px;">
+             <strong style="color:#f2c98a;">Please check your backup storage.</strong> Almost all of your data had to be uploaded again even though earlier restore points exist. This usually means the destination was emptied or replaced. Your files are safe, but older restore points may no longer be available.
+           </div>`
+        : ''}
       ${this.config.includeStats !== false ? this.summaryGrid(data) : ''}
       ${this.sourceRows(data.sources)}
       ${this.linkButtons(data.links)}`;
-    return this.wrap(COLORS.accent, '✓', 'Backup successful', 'A new restore point was created and verified.', body);
+    return this.wrap(COLORS.accent, '✓', 'Backup successful', 'Your files are protected and a new restore point is available.', body);
   }
 
   generateTestEmail() {

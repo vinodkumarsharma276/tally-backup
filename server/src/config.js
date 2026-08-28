@@ -25,6 +25,9 @@ function loadConfig(env = process.env) {
     // still verify until they expire.
     jwtSecretPrevious: env.JWT_SECRET_PREVIOUS || '',
     tokenTtlSeconds: int(env.TOKEN_TTL_SECONDS, 900),
+    // Sessions outlive tokens so a machine stays signed in while offline.
+    userTokenTtlSeconds: int(env.USER_TOKEN_TTL_SECONDS, 30 * 24 * 60 * 60),
+    googleClientIds: String(env.GOOGLE_CLIENT_IDS || '').split(',').map((value) => value.trim()).filter(Boolean),
     leaseTtlSeconds: int(env.LEASE_TTL_SECONDS, 3600),
     // Data residency: the region customer data is stored in (compliance).
     dataRegion: env.DATA_REGION || env.MANAGED_REGION || 'us-east-1',

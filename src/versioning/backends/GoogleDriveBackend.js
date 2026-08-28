@@ -1,9 +1,37 @@
 'use strict';
 
 const { Readable } = require('stream');
+const logger = require('../../utils/logger');
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const FILE_MIME = 'application/octet-stream';
+const MAX_RATE_LIMIT_RETRIES = 8;
+
+// Everything the versioned store is allowed to put in a repository root:
+// loose-object layout, packed layout, and the repository identity marker.
+const VERSIONED_ENTRIES = new Set(['objects', 'packs', 'snapshots', 'refs.json', 'repo.json']);
+
+// Drive reports throttling inconsistently: sometimes as `errors[].reason`,
+// sometimes only as prose ("User rate limit exceeded."), and the HTTP status
+// may be 403 or 429. Match on any of them rather than one shape.
+function isRateLimitError(err) {
+  if (!err) return false;
+  const status = err.code || err.status || (err.response && err.response.status);
+  const apiError = err.response && err.response.data && err.response.data.error;
+  const haystack = [
+    ...(err.errors || []).map((e) => e && e.reason),
+    ...(((apiError && apiError.errors) || []).map((e) => e && e.reason)),
+    apiError && apiError.status,
+    apiError && apiError.message,
+    err.message,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  if (!/rate.?limit|quota.?exceeded|too many requests|resource_exhausted|backendError|internal error/i.test(haystack)) {
+    return false;
+  }
+  return status === 403 || status === 429 || status === 500 || status === 503 || !status;
+}
 
 /**
  * GoogleDriveBackend — storage backend that maps object keys onto a Google
@@ -50,19 +78,15 @@ class GoogleDriveBackend {
       try {
         return await this.driveService.apiCall(fn);
       } catch (err) {
-        const status = err && (err.code || (err.response && err.response.status));
-        const reason =
-          (err && err.errors && err.errors[0] && err.errors[0].reason) || (err && err.message) || '';
-        const rateLimited =
-          status === 429 ||
-          (status === 403 && /rateLimit|userRateLimitExceeded|rateLimitExceeded/i.test(reason));
-        if (rateLimited && attempt < 6) {
-          const delay = Math.min(2 ** attempt * 500 + Math.random() * 300, 15000);
-          attempt += 1;
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-        throw err;
+        if (!isRateLimitError(err) || attempt >= MAX_RATE_LIMIT_RETRIES) throw err;
+        // Drive quotas refill on a rolling 60s window, so waiting is worthwhile.
+        const delay = Math.min(2 ** attempt * 1000 + Math.random() * 500, 60000);
+        attempt += 1;
+        logger.warn(
+          `Google Drive rate limit hit (${err.message}). Waiting ${Math.round(delay / 1000)}s ` +
+            `before retry ${attempt}/${MAX_RATE_LIMIT_RETRIES}.`
+        );
+        await new Promise((r) => setTimeout(r, delay));
       }
     }
   }
@@ -76,12 +100,10 @@ class GoogleDriveBackend {
   }
 
   // Refuse to use a root folder that already holds non-versioned content (e.g.
-  // a legacy mirror with DATA/VHA/TDL). Only the versioned layout is allowed:
-  // objects/, snapshots/, refs.json. Pass { allowMixed: true } to override.
+  // a legacy mirror with DATA/VHA/TDL). Pass { allowMixed: true } to override.
   async _guardNotAMirror() {
-    const allowed = new Set(['objects', 'snapshots', 'refs.json']);
     const children = await this._listFolder(this.rootFolderId);
-    const foreign = [...children.keys()].filter((name) => !allowed.has(name));
+    const foreign = [...children.keys()].filter((name) => !VERSIONED_ENTRIES.has(name));
     if (foreign.length > 0 && !this.allowMixed) {
       const sample = foreign.slice(0, 5).join(', ');
       throw new Error(

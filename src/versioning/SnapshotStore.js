@@ -46,6 +46,7 @@ class SnapshotStore {
       source: snapshot.source,
       fileCount: snapshot.fileCount,
       totalBytes: snapshot.totalBytes,
+      roots: snapshot.roots || [],
     });
     refs.snapshots.sort((a, b) => a.id.localeCompare(b.id));
     refs.latest = refs.snapshots[refs.snapshots.length - 1].id;

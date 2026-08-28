@@ -26,12 +26,32 @@ function bytes(value = 0) {
   return `${size.toFixed(index < 2 ? 0 : 1)} ${units[index]}`;
 }
 
+const SYSTEM_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
+
+const TIMEZONES = (() => {
+  const all = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+  return all.length ? all : [SYSTEM_TIMEZONE, 'Asia/Kolkata', 'UTC'];
+})();
+
+function TimezoneField({ value, onChange, hint }) {
+  return (
+    <SelectField label="Time zone" value={value || SYSTEM_TIMEZONE} onChange={onChange} hint={hint}>
+      {!TIMEZONES.includes(value || SYSTEM_TIMEZONE) && <option value={value}>{value}</option>}
+      {TIMEZONES.map((zone) => (
+        <option key={zone} value={zone}>
+          {zone === SYSTEM_TIMEZONE ? `${zone} (this computer)` : zone}
+        </option>
+      ))}
+    </SelectField>
+  );
+}
+
 function displayDate(value) {
   if (!value) return 'Not available';
-  return new Intl.DateTimeFormat('en-IN', {
+  return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
-    timeZone: 'Asia/Kolkata',
+    timeZone: SYSTEM_TIMEZONE,
   }).format(new Date(value));
 }
 
@@ -116,7 +136,52 @@ function ProgressPanel({ operation, progress, operationLogs, onCancel }) {
   );
 }
 
-function Overview({ config, operation, progress, operationLogs, startBackup, cancelOperation, setPage }) {
+function RunHistory({ runHistory, refreshHistory, openFolder }) {
+  const [days, setDays] = useState('7');
+  const cutoff = days === 'all' ? 0 : Date.now() - Number(days) * 86400000;
+  const rows = (runHistory || []).filter((run) => new Date(run.completedAt || run.startedAt).getTime() >= cutoff);
+
+  return (
+    <section className="card">
+      <div className="section-heading">
+        <div><span className="eyebrow">History</span><h3>Recent activity</h3></div>
+        <div className="section-heading-actions">
+          <select value={days} onChange={(event) => setDays(event.target.value)}>
+            <option value="1">Last 24 hours</option>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="all">Everything</option>
+          </select>
+          <Button variant="ghost" onClick={refreshHistory}>Refresh</Button>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState title="No runs in this period" text="Backups and restores appear here once they finish." />
+      ) : (
+        <div className="history-list">
+          {rows.map((run, index) => (
+            <div className="history-row" key={`${run.completedAt}-${index}`}>
+              <span className={cx('history-dot', run.status)} />
+              <div className="history-main">
+                <strong>{run.type === 'restore' ? 'Restore' : 'Backup'}{run.sourceName ? ` · ${run.sourceName}` : ''}</strong>
+                <span>{displayDate(run.completedAt || run.startedAt)} · {run.origin === 'scheduled' ? 'Scheduled' : 'Manual'}{run.durationMs ? ` · ${Math.max(1, Math.round(run.durationMs / 1000))}s` : ''}</span>
+              </div>
+              <div className="history-meta">
+                <Pill tone={run.status === 'success' ? 'success' : 'warn'}>{run.status === 'success' ? 'Succeeded' : 'Failed'}</Pill>
+                {run.type === 'restore' && run.destPath && (
+                  <Button variant="ghost" onClick={() => openFolder(run.destPath)}>Open folder</Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Overview({ config, operation, progress, operationLogs, startBackup, startRestore, cancelOperation, setPage, openFolder, runHistory, refreshHistory, lastRestorePath }) {
   const sources = config.backup?.sources || [];
   const running = operation?.status === 'running';
   const enabled = sources.filter((source) => source.enabled !== false);
@@ -147,6 +212,16 @@ function Overview({ config, operation, progress, operationLogs, startBackup, can
 
       <ProgressPanel operation={operation} progress={progress} operationLogs={operationLogs} onCancel={cancelOperation} />
 
+      {operation?.type === 'restore' && operation?.status === 'success' && (lastRestorePath || operation.destPath) && (
+        <section className="card restore-done">
+          <div>
+            <strong>Your files are restored.</strong>
+            <span>{lastRestorePath || operation.destPath}</span>
+          </div>
+          <Button onClick={() => openFolder(lastRestorePath || operation.destPath)}>Open restored folder</Button>
+        </section>
+      )}
+
       <section className="metric-grid">
         <article className="metric-card"><span className="metric-icon green">↑</span><div><b>{backups.length}</b><span>Active backups</span></div></article>
         <article className="metric-card"><span className="metric-icon blue">↶</span><div><b>{restores.length}</b><span>Restore jobs</span></div></article>
@@ -165,15 +240,49 @@ function Overview({ config, operation, progress, operationLogs, startBackup, can
               <div className={cx('source-badge', source.operation)}>{source.operation === 'backup' ? '↑' : '↓'}</div>
               <div className="source-summary-main"><strong>{source.name}</strong><span>{source.sourcePath}</span></div>
               <div className="source-summary-meta"><Pill tone={source.operation === 'backup' ? 'success' : 'info'}>{source.operation}</Pill><span>{source.storageProfile || source.backupFolderName}</span></div>
-              {source.operation === 'backup' && (
-                <Button variant="secondary" disabled={running} onClick={() => startBackup(source.name)}>Back up</Button>
-              )}
+              <div className="source-actions">
+                {source.operation === 'backup' ? (
+                  <Button variant="secondary" disabled={running} onClick={() => startBackup(source.name)}>Back up</Button>
+                ) : (
+                  <>
+                    <Button variant="ghost" onClick={() => openFolder(source.sourcePath)}>Open folder</Button>
+                    <Button variant="secondary" disabled={running} onClick={() => startRestore({ sourceName: source.name, snapshotId: source.restore?.snapshotId || 'latest', destPath: source.sourcePath })}>Restore</Button>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>
       </section>
+
+      <RunHistory runHistory={runHistory} refreshHistory={refreshHistory} openFolder={openFolder} />
     </div>
   );
+}
+
+function profileSummary(profile) {
+  if (!profile) return 'No storage selected';
+  const prefix = profile.prefix || profile.rootPrefix;
+  if (profile.type === 'google_drive') return `Google Drive folder “${profile.rootFolderName || '—'}”`;
+  if (profile.type === 'local') return `This computer: ${profile.rootDir || '—'}`;
+  if (profile.type === 'network') return `Network: ${profile.rootDir || '—'}`;
+  if (profile.type === 's3') return `S3 ${profile.bucket || '—'}${prefix ? `/${prefix}` : ''}`;
+  if (profile.type === 'azure_blob') return `Azure ${profile.containerName || '—'}${prefix ? `/${prefix}` : ''}`;
+  if (profile.type === 'managed') return `Managed cloud (${profile.tenantId || '—'})`;
+  return storageName(profile.type);
+}
+
+// A source may run at several times a day; older configs held a single cron.
+function schedulesOf(source, fallback) {
+  if (Array.isArray(source.schedules) && source.schedules.length) return source.schedules;
+  if (source.schedule) return [source.schedule];
+  return fallback ? [fallback] : [DEFAULT_SCHEDULE];
+}
+
+// A backup source may write to several destinations; older configs used one.
+function destinationsOf(source) {
+  if (Array.isArray(source.storageProfiles) && source.storageProfiles.length) return source.storageProfiles;
+  return source.storageProfile ? [source.storageProfile] : [];
 }
 
 function defaultLabel(folderPath) {
@@ -203,9 +312,34 @@ function addFolder(list) {
   return foldersPatch([...list, { path: '', label: '' }]);
 }
 
-function Sources({ config, setConfig, chooseDirectory, googleAccount }) {
+function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, openFolder, onRestore }) {
+  const [snapshotOptions, setSnapshotOptions] = useState({});
+  const [loadingSnapshots, setLoadingSnapshots] = useState('');
+  const loadSnapshots = async (index, source) => {
+    if (!source.storageProfile) {
+      notify('Choose a storage profile first.', 'error');
+      return;
+    }
+    setLoadingSnapshots(String(index));
+    try {
+      const result = await api.listSnapshotsByProfile(source.storageProfile);
+      setSnapshotOptions((current) => ({ ...current, [index]: result }));
+      if (!result.snapshots.length) notify('No restore points found in that storage yet.', 'error');
+    } catch (error) {
+      notify(error.message, 'error');
+    } finally {
+      setLoadingSnapshots('');
+    }
+  };
   const sources = config.backup?.sources || [];
   const profiles = Object.keys(config.storageProfiles || {});
+  const updateProfile = (profileName, patch) => setConfig((current) => ({
+    ...current,
+    storageProfiles: {
+      ...current.storageProfiles,
+      [profileName]: { ...current.storageProfiles[profileName], ...patch },
+    },
+  }));
   const update = (index, patch) => setConfig((current) => ({
     ...current,
     backup: {
@@ -221,19 +355,20 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount }) {
     ...current,
     backup: {
       ...current.backup,
-      sources: [...current.backup.sources, {
+      sources: [{
         name: `Source ${current.backup.sources.length + 1}`,
         enabled: true,
         operation: 'backup',
         sourcePath: '',
         storageProfile: profiles[0] || '',
-      }],
+      }, ...current.backup.sources],
     },
   }));
 
   return (
     <div className="page-stack">
       <div className="page-title-row"><div><span className="eyebrow">Data jobs</span><h2>Backup & restore sources</h2><p>Choose what to protect, where to store it, and when restores should run.</p></div><Button onClick={add}>+ Add source</Button></div>
+      <div className="source-grid">
       {sources.map((source, index) => (
         <article className="card source-editor" key={`source-${index}`}>
           <div className="source-editor-head">
@@ -246,10 +381,70 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount }) {
             <SelectField label="Operation" value={source.operation} onChange={(event) => update(index, { operation: event.target.value, restore: event.target.value === 'restore' ? (source.restore || { mode: 'manual', snapshotId: 'latest', cleanDest: false, timezone: 'Asia/Kolkata' }) : source.restore })}>
               <option value="backup">Backup</option><option value="restore">Restore</option>
             </SelectField>
-            <SelectField label="Storage profile" value={source.storageProfile || ''} onChange={(event) => update(index, { storageProfile: event.target.value })}>
-              <option value="">Choose storage…</option>{profiles.map((name) => <option key={name}>{name}</option>)}
-            </SelectField>
+            {source.operation === 'backup' ? (
+              <div className="field">
+                <span className="field-label">Destinations</span>
+                <div className="destination-list">
+                  {profiles.map((profileName) => {
+                    const selected = destinationsOf(source);
+                    const checked = selected.includes(profileName);
+                    return (
+                      <label className="check-row" key={profileName}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? [...selected, profileName]
+                              : selected.filter((n) => n !== profileName);
+                            update(index, { storageProfiles: next, storageProfile: next[0] || '' });
+                          }}
+                        />
+                        <span>{profileName}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {destinationsOf(source).length > 1 && (
+                  <span className="field-hint">This source is copied to {destinationsOf(source).length} destinations, each keeping its own restore points.</span>
+                )}
+                {destinationsOf(source).length === 0 && <span className="field-hint">Choose at least one destination.</span>}
+              </div>
+            ) : (
+              <SelectField label="Restore from (storage)" value={source.storageProfile || ''} onChange={(event) => update(index, { storageProfile: event.target.value })}>
+                <option value="">Choose storage…</option>{profiles.map((name) => <option key={name}>{name}</option>)}
+              </SelectField>
+            )}
           </div>
+          {source.operation === 'backup' && destinationsOf(source).length > 0 && (
+            <div className="subpanel destination-detail">
+              <span className="field-label">Where this lands</span>
+              {destinationsOf(source).map((profileName) => {
+                const profile = (config.storageProfiles || {})[profileName];
+                if (!profile) {
+                  return <span className="field-hint warn" key={profileName}>{profileName} no longer exists. Pick another destination.</span>;
+                }
+                if (profile.type === 'google_drive') {
+                  return (
+                    <Field
+                      key={profileName}
+                      label={`Google Drive folder — ${profileName}`}
+                      value={profile.rootFolderName || ''}
+                      placeholder="Backup Genie"
+                      onChange={(event) => updateProfile(profileName, { rootFolderName: event.target.value })}
+                      hint="Created in your Drive if it does not exist. Shared by every source using this storage."
+                    />
+                  );
+                }
+                return (
+                  <div className="static-row" key={profileName}>
+                    <span>{profileName}</span>
+                    <strong>{profileSummary(profile)}</strong>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {source.operation === 'backup' ? (
             <div className="folder-list">
               <span className="field-label">Folders to back up</span>
@@ -283,27 +478,50 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount }) {
               )}
             </div>
           ) : (
-            <div className="path-row">
+            <div className="path-row with-open">
               <Field label="Restore destination" value={source.sourcePath || ''} onChange={(event) => update(index, { sourcePath: event.target.value })} />
               <Button variant="secondary" onClick={async () => { const selected = await chooseDirectory(source.sourcePath); if (selected) update(index, { sourcePath: selected }); }}>Browse</Button>
+              <Button variant="ghost" onClick={() => openFolder(source.sourcePath)}>Open folder</Button>
             </div>
           )}
           {source.operation === 'backup' && (
             <div className="subpanel">
-              <div className="form-grid">
-                <SelectField
-                  label="Schedule"
-                  value={SCHEDULE_PRESETS.some(([v]) => v === source.schedule) ? source.schedule : (source.schedule ? 'custom' : '')}
-                  onChange={(event) => update(index, { schedule: event.target.value === 'custom' ? (source.schedule || '0 20 * * *') : event.target.value })}
-                >
-                  <option value="">Use the global schedule</option>
-                  {SCHEDULE_PRESETS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  <option value="custom">Custom…</option>
-                </SelectField>
-                {source.schedule && (
-                  <Field label="Cron expression" value={source.schedule} onChange={(event) => update(index, { schedule: event.target.value })} hint="minute hour day month weekday" />
-                )}
-              </div>
+              <span className="field-label">Schedule</span>
+              {schedulesOf(source, config.backup?.schedule).map((expression, slot) => {
+                const list = schedulesOf(source, config.backup?.schedule);
+                return (
+                  <div className="schedule-slot" key={`schedule-${slot}`}>
+                    <ScheduleEditor
+                      value={expression}
+                      onChange={(next) => {
+                        const updated = list.map((item, i) => (i === slot ? next : item));
+                        update(index, { schedules: updated, schedule: updated[0] });
+                      }}
+                    />
+                    {list.length > 1 && (
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => {
+                          const updated = list.filter((_, i) => i !== slot);
+                          update(index, { schedules: updated, schedule: updated[0] });
+                        }}
+                      >
+                        Remove this time
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  const updated = [...schedulesOf(source, config.backup?.schedule), DEFAULT_SCHEDULE];
+                  update(index, { schedules: updated, schedule: updated[0] });
+                }}
+              >
+                + Add another time
+              </Button>
             </div>
           )}
           <div className="subpanel">
@@ -332,15 +550,33 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount }) {
             <div className="subpanel">
               <div className="form-grid three">
                 <SelectField label="Restore mode" value={source.restore?.mode || 'manual'} onChange={(event) => update(index, { restore: { ...source.restore, mode: event.target.value } })}><option value="manual">Manual</option><option value="scheduled">Scheduled</option></SelectField>
-                <Field label="Snapshot" value={source.restore?.snapshotId || 'latest'} onChange={(event) => update(index, { restore: { ...source.restore, snapshotId: event.target.value } })} />
+                <SelectField label="Restore point" value={source.restore?.snapshotId || 'latest'} onChange={(event) => update(index, { restore: { ...source.restore, snapshotId: event.target.value } })}>
+                  <option value="latest">Latest available</option>
+                  {(snapshotOptions[index]?.snapshots || []).map((snapshot) => (
+                    <option key={snapshot.id} value={snapshot.id}>{displayDate(snapshot.createdAt)} · {snapshot.fileCount} files · {bytes(snapshot.totalBytes)}</option>
+                  ))}
+                  {source.restore?.snapshotId && source.restore.snapshotId !== 'latest' && !(snapshotOptions[index]?.snapshots || []).some((s) => s.id === source.restore.snapshotId) && (
+                    <option value={source.restore.snapshotId}>{source.restore.snapshotId}</option>
+                  )}
+                </SelectField>
                 {source.restore?.mode === 'scheduled' && <Field label="Cron schedule" value={source.restore?.schedule || ''} onChange={(event) => update(index, { restore: { ...source.restore, schedule: event.target.value } })} />}
+              </div>
+              <div className="notify-actions">
+                <Button variant="secondary" busy={loadingSnapshots === String(index)} onClick={() => loadSnapshots(index, source)}>Browse restore points</Button>
+                <span className="field-hint">Reading from {snapshotOptions[index]?.storageLabel || profileSummary((config.storageProfiles || {})[source.storageProfile])}</span>
               </div>
               <label className="check-row"><input type="checkbox" checked={source.restore?.cleanDest === true} onChange={(event) => update(index, { restore: { ...source.restore, cleanDest: event.target.checked } })} /><span>Clear destination before restoring</span></label>
             </div>
           )}
-          <div className="card-footer"><Button variant="danger-ghost" onClick={() => remove(index)}>Remove source</Button></div>
+          <div className="card-footer">
+            {source.operation === 'backup' && destinationsOf(source).length > 0 && (
+              <Button variant="secondary" onClick={() => onRestore(source)}>Restore this backup…</Button>
+            )}
+            <Button variant="danger-ghost" onClick={() => remove(index)}>Remove source</Button>
+          </div>
         </article>
       ))}
+      </div>
     </div>
   );
 }
@@ -376,11 +612,29 @@ function missingProfileFields(profile) {
   return (requiredProfileFields[profile.type] || []).filter((key) => !String(profile[key] || '').trim());
 }
 
+// Only providers proven end-to-end are offered; the rest stay visible but disabled.
+const SUPPORTED_PROVIDERS = ['google_drive', 'local'];
+const PROVIDER_CHOICES = [
+  ['google_drive', 'Google Drive'],
+  ['local', 'Local folder'],
+  ['network', 'Network / NAS'],
+  ['s3', 'S3 compatible'],
+  ['azure_blob', 'Azure Blob'],
+  ['managed', 'Managed cloud'],
+];
+
 function profileFacts(profile, googleAccount) {
   const facts = [];
   const prefix = profile.prefix || profile.rootPrefix;
   if (profile.type === 'google_drive') {
-    facts.push(['Account', googleAccount?.email || 'Not connected']);
+    facts.push([
+      'Account',
+      !googleAccount?.email
+        ? 'Not connected'
+        : googleAccount.ownAccount
+          ? googleAccount.email
+          : `${googleAccount.email} (shared — click “Connect Google” to use another)`,
+    ]);
     facts.push(['Drive folder', profile.rootFolderName || '—']);
     if (googleAccount?.quotaLimit) {
       facts.push(['Drive storage', `${bytes(googleAccount.quotaUsed)} of ${bytes(googleAccount.quotaLimit)} used`]);
@@ -406,10 +660,14 @@ function profileFacts(profile, googleAccount) {
   return facts;
 }
 
-function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile, notify, googleAccount }) {
+function Storage({ config, setConfig, chooseDirectory, testStorage, verifyStorage, verifyingProfile, startGoogleAuth, testingProfile, notify, googleAccounts }) {
   const profiles = config.storageProfiles || {};
   const secretStatus = config._secretStatus || { storageProfiles: {} };
-  const usedBy = (name) => (config.backup?.sources || []).filter((source) => source.storageProfile === name).map((source) => source.name);
+  // A profile only becomes fixed once it has a backup history to protect.
+  const profilesInUse = config._profilesInUse || [];
+  const usedBy = (name) => (config.backup?.sources || []).filter((source) => destinationsOf(source).includes(name)).map((source) => source.name);
+  // Extra copies mirror the main destination, so their own retention never applies.
+  const usedAsCopy = (name) => (config.backup?.sources || []).some((source) => destinationsOf(source).indexOf(name) > 0);
   const removeProfile = (name) => {
     const inUse = usedBy(name);
     if (inUse.length) {
@@ -442,29 +700,74 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleA
       return {
         ...current,
         storageProfiles: nextProfiles,
-        backup: { ...current.backup, sources: current.backup.sources.map((source) => source.storageProfile === oldName ? { ...source, storageProfile: newName } : source) },
+        backup: {
+          ...current.backup,
+          sources: current.backup.sources.map((source) => {
+            const next = destinationsOf(source).map((profileName) => (profileName === oldName ? newName : profileName));
+            if (!next.includes(newName)) return source;
+            return {
+              ...source,
+              storageProfile: next[0],
+              ...(Array.isArray(source.storageProfiles) && source.storageProfiles.length ? { storageProfiles: next } : {}),
+            };
+          }),
+        },
       };
     });
   };
-  const addProfile = () => {
-    let name = 'new-local-storage';
+  const [unlockedProvider, setUnlockedProvider] = useState('');
+
+  const addProfile = (type) => {
+    const base = type === 'google_drive' ? 'new-google-drive' : 'new-local-storage';
+    let name = base;
     let count = 2;
-    while (profiles[name]) name = `new-local-storage-${count++}`;
-    setConfig((current) => ({ ...current, storageProfiles: { ...current.storageProfiles, [name]: { type: 'local', rootDir: '' } } }));
+    while (profiles[name]) name = `${base}-${count++}`;
+    setConfig((current) => ({
+      ...current,
+      storageProfiles: {
+        ...current.storageProfiles,
+        [name]: type === 'google_drive'
+          ? { type: 'google_drive', rootFolderName: name }
+          : { type: 'local', rootDir: '' },
+      },
+    }));
   };
 
   return (
     <div className="page-stack">
-      <div className="page-title-row"><div><span className="eyebrow">Destinations</span><h2>Storage</h2><p>Connect customer-owned or managed storage and test access before a backup.</p></div><Button onClick={addProfile}>+ Add storage</Button></div>
+      <div className="page-title-row">
+        <div><span className="eyebrow">Destinations</span><h2>Storage</h2><p>Connect customer-owned storage and test access before a backup. The provider is chosen when you add a profile and cannot be changed later.</p></div>
+        <div className="notify-actions">
+          <Button variant="secondary" onClick={() => addProfile('google_drive')}>+ Google Drive</Button>
+          <Button onClick={() => addProfile('local')}>+ Local folder</Button>
+        </div>
+      </div>
       <div className="storage-grid">
         {Object.entries(profiles).map(([name, profile]) => (
           <article className="card storage-card" key={name}>
             <div className="storage-head"><div className={`provider-logo provider-${profile.type}`}>{profile.type === 'google_drive' ? 'G' : profile.type === 'azure_blob' ? 'A' : profile.type === 's3' ? 'S3' : profile.type === 'network' ? 'N' : profile.type === 'managed' ? 'VE' : 'L'}</div><div><h3>{name}</h3><span>{storageName(profile.type)}</span></div><Pill tone={profile.tenancy === 'managed' ? 'violet' : 'neutral'}>{profile.tenancy || 'customer'}</Pill></div>
             <div className="form-grid">
               <Field label="Profile name" defaultValue={name} onBlur={(event) => rename(name, event.target.value.trim())} />
-              <SelectField label="Provider" value={profile.type} onChange={(event) => update(name, providerDefaults(event.target.value, name, profile))}>
-                <option value="google_drive">Google Drive</option><option value="local">Local folder</option><option value="network">Network / NAS</option><option value="s3">S3 compatible</option><option value="azure_blob">Azure Blob</option><option value="managed">Managed cloud</option>
-              </SelectField>
+              <div className="field">
+                <span className="field-label">Provider</span>
+                <select value={profile.type} disabled={profilesInUse.includes(name) && unlockedProvider !== name} onChange={(event) => update(name, providerDefaults(event.target.value, name, profile))}>
+                  {PROVIDER_CHOICES.map(([value, label]) => (
+                    <option key={value} value={value} disabled={!SUPPORTED_PROVIDERS.includes(value) && profile.type !== value}>
+                      {SUPPORTED_PROVIDERS.includes(value) ? label : `${label} — not available yet`}
+                    </option>
+                  ))}
+                </select>
+                {!profilesInUse.includes(name) ? (
+                  <span className="field-hint">You can change this until the first backup runs.</span>
+                ) : unlockedProvider === name ? (
+                  <span className="field-hint warn">This profile already holds backups. Restore points saved in the old location will not appear here.</span>
+                ) : (
+                  <span className="field-hint">
+                    Fixed so an existing backup history can never be pointed at a different location.{' '}
+                    <button type="button" className="link-button" onClick={() => setUnlockedProvider(name)}>Change provider</button>
+                  </span>
+                )}
+              </div>
             </div>
             {(publicProfileFields[profile.type] || []).map(([key, label]) => (
               <div className={key === 'rootDir' ? 'path-row compact' : ''} key={key}>
@@ -472,10 +775,32 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleA
                 {key === 'rootDir' && <Button variant="secondary" onClick={async () => { const selected = await chooseDirectory(profile[key]); if (selected) update(name, { [key]: selected }); }}>Browse</Button>}
               </div>
             ))}
+            <div className="form-grid" style={{ marginTop: 12 }}>
+              <Field
+                type="number"
+                min="1"
+                max="30"
+                label="Restore history (days)"
+                value={profile.keepDailyBackups || config.retention?.keepDailyBackups || 30}
+                onChange={(event) => {
+                  const days = Math.min(30, Math.max(1, Number(event.target.value) || 1));
+                  update(name, { keepDailyBackups: days });
+                }}
+                hint={usedAsCopy(name)
+                  ? 'This storage is an extra copy, so it follows the main destination’s history.'
+                  : 'Restore points older than this are removed from this storage (1–30 days).'}
+              />
+            </div>
             {profile.type === 'network' && <div className="form-grid secret-fields"><Field label="Network username" value={profile.auth?.username || ''} onChange={(event) => updateAuth(name, { username: event.target.value })} /><Field type="password" label="Network password" value={profile.auth?.password || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter password'} onChange={(event) => updateAuth(name, { password: event.target.value })} /></div>}
             {profile.type === 's3' && <div className="form-grid secret-fields"><Field type="password" label="Access key ID" value={profile.auth?.accessKeyId || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter access key'} onChange={(event) => updateAuth(name, { accessKeyId: event.target.value })} /><Field type="password" label="Secret access key" value={profile.auth?.secretAccessKey || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter secret key'} onChange={(event) => updateAuth(name, { secretAccessKey: event.target.value })} /></div>}
             {profile.type === 'managed' && <div className="form-grid secret-fields"><Field type="password" label="License key" value={profile.auth?.licenseKey || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter license key'} onChange={(event) => updateAuth(name, { licenseKey: event.target.value })} /></div>}
             {profile.type === 'azure_blob' && <><SelectField label="Azure authentication" value={profile.auth?.mode || 'interactive'} onChange={(event) => updateAuth(name, { mode: event.target.value })}><option value="interactive">Microsoft interactive sign-in</option><option value="default">Azure development credential</option><option value="managed_identity">Managed identity</option><option value="sas">SAS token</option></SelectField>{profile.auth?.mode === 'sas' && <Field type="password" label="SAS token" value={profile.auth?.sasToken || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter SAS token'} onChange={(event) => updateAuth(name, { sasToken: event.target.value })} />}</>}
+            {!SUPPORTED_PROVIDERS.includes(profile.type) && (
+              <div className="profile-warning">
+                <span>!</span>
+                {storageName(profile.type)} is not available yet. Backups using this profile will not run — use Google Drive or a local folder.
+              </div>
+            )}
             {missingProfileFields(profile).length > 0 && (
               <div className="profile-warning">
                 <span>!</span>
@@ -483,15 +808,17 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleA
               </div>
             )}
             <dl className="storage-facts">
-              {profileFacts(profile, googleAccount).map(([label, value]) => (
+              {profileFacts(profile, googleAccounts[name]).map(([label, value]) => (
                 <div key={label}><dt>{label}</dt><dd title={String(value)}>{value}</dd></div>
               ))}
               <div><dt>Used by</dt><dd>{usedBy(name).length ? usedBy(name).join(', ') : 'No sources yet'}</dd></div>
             </dl>
-            <div className={cx('credential-note', (profile.type === 'google_drive' ? secretStatus.googleToken : secretStatus.storageProfiles?.[name]) && 'credential-stored')}>
-              <span>{(profile.type === 'google_drive' ? secretStatus.googleToken : secretStatus.storageProfiles?.[name]) ? '✓' : '○'}</span>
+            <div className={cx('credential-note', (profile.type === 'google_drive' ? googleAccounts[name]?.ownAccount : secretStatus.storageProfiles?.[name]) && 'credential-stored')}>
+              <span>{(profile.type === 'google_drive' ? googleAccounts[name]?.ownAccount : secretStatus.storageProfiles?.[name]) ? '✓' : '○'}</span>
               {profile.type === 'google_drive'
-                ? `${secretStatus.googleToken ? 'Your Google account is connected. Authorization is stored securely in the OS vault.' : 'Click "Connect Google" to authorize your own Google account.'}`
+                ? googleAccounts[name]?.ownAccount
+                  ? `This profile is connected to ${googleAccounts[name].email}. Authorization is stored securely in the OS vault.`
+                  : 'This profile has no Google account of its own yet. Click “Connect Google” and sign in with the account whose Drive should hold these backups.'
                 : secretStatus.storageProfiles?.[name]
                   ? 'Credentials are stored in the operating system credential vault.'
                   : ['local'].includes(profile.type) ? 'This provider does not require a password.' : 'Enter credentials and save to move them into secure OS storage.'}
@@ -499,7 +826,8 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleA
             <div className="card-footer storage-actions">
               <Button variant="danger-ghost" onClick={() => removeProfile(name)}>Remove</Button>
               <Button variant="secondary" busy={testingProfile === name} disabled={missingProfileFields(profile).length > 0} onClick={() => testStorage(name)}>Test connection</Button>
-              {profile.type === 'google_drive' && <Button variant="ghost" onClick={startGoogleAuth}>Connect Google</Button>}
+              <Button variant="secondary" busy={verifyingProfile === name} disabled={missingProfileFields(profile).length > 0} onClick={() => verifyStorage(name)}>Verify backup</Button>
+              {profile.type === 'google_drive' && <Button variant="ghost" onClick={() => startGoogleAuth(name)}>{googleAccounts[name]?.email ? 'Use another account' : 'Connect Google'}</Button>}
             </div>
           </article>
         ))}
@@ -508,38 +836,104 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, startGoogleA
   );
 }
 
-function Restore({ config, snapshots, snapshotsMeta, loadSnapshots, startRestore, chooseDirectory, operation }) {
-  const restoreSources = (config.backup?.sources || []).filter((source) => source.operation === 'restore' && source.enabled !== false);
-  const [sourceName, setSourceName] = useState(restoreSources[0]?.name || '');
-  const [snapshotId, setSnapshotId] = useState('latest');
-  const [destination, setDestination] = useState(restoreSources[0]?.sourcePath || '');
-  useEffect(() => {
-    const source = restoreSources.find((item) => item.name === sourceName);
-    if (source) setDestination(source.sourcePath || '');
-  }, [sourceName]);
+function RestoreCard({ entry, onRestore }) {
+  const [profileName, setProfileName] = useState(entry.destinations[0]);
+  const [points, setPoints] = useState(null);
+  const [storageLabel, setStorageLabel] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  if (!restoreSources.length) return <EmptyState icon="↶" title="No restore source configured" text="Add an enabled restore source first." />;
+  const load = async (name) => {
+    setBusy(true);
+    try {
+      const result = await api.listSnapshotsByProfile(name);
+      setPoints(result.snapshots || []);
+      setStorageLabel(result.storageLabel || '');
+    } catch (error) {
+      setPoints([]);
+      setStorageLabel(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => { load(profileName); }, [profileName]);
+
+  const latest = points && points[0];
+  return (
+    <article className="card restore-card">
+      <div className="source-editor-head">
+        <div className="source-icon restore">↶</div>
+        <div>
+          <h3>{entry.label}</h3>
+          <span>{storageLabel || profileName}</span>
+        </div>
+      </div>
+      {entry.destinations.length > 1 && (
+        <SelectField label="Restore from" value={profileName} onChange={(event) => setProfileName(event.target.value)}>
+          {entry.destinations.map((name, i) => (
+            <option key={name} value={name}>{name}{i === 0 ? ' — main destination' : ' — copy'}</option>
+          ))}
+        </SelectField>
+      )}
+      <dl className="storage-facts">
+        <div><dt>Restore points</dt><dd>{points === null ? 'Loading…' : points.length}</dd></div>
+        <div><dt>Most recent</dt><dd>{latest ? displayDate(latest.createdAt) : '—'}</dd></div>
+        <div><dt>Protected folders</dt><dd>{rootLabels(latest).join(', ') || '—'}</dd></div>
+        <div><dt>Size</dt><dd>{latest ? bytes(latest.totalBytes) : '—'}</dd></div>
+      </dl>
+      <div className="card-footer">
+        <Button variant="secondary" busy={busy} onClick={() => load(profileName)}>Refresh</Button>
+        <Button disabled={!points || points.length === 0} onClick={() => onRestore(entry.source, profileName)}>Restore…</Button>
+      </div>
+    </article>
+  );
+}
+
+// A snapshot from a multi-folder backup namespaces each folder it captured.
+function rootLabels(snapshot) {
+  if (!snapshot) return [];
+  return (snapshot.roots || [])
+    .map((root) => root.namespace || (root.path || '').split(/[\\/]/).filter(Boolean).pop())
+    .filter(Boolean);
+}
+
+function Restore({ config, onRestore, openFolder }) {
+  // Restore points belong to backup jobs; a separate restore job is optional.
+  const backupSources = (config.backup?.sources || []).filter(
+    (source) => source.operation === 'backup' && destinationsOf(source).length > 0
+  );
+  const restoreJobs = (config.backup?.sources || []).filter((source) => source.operation === 'restore' && source.enabled !== false);
+  const entries = [
+    ...backupSources.map((source) => ({
+      key: source.name,
+      label: source.name,
+      destinations: destinationsOf(source),
+      source,
+    })),
+    ...restoreJobs.map((source) => ({
+      key: `job:${source.name}`,
+      label: `${source.name} (restore job)`,
+      destinations: [source.storageProfile].filter(Boolean),
+      source,
+    })),
+  ].filter((entry) => entry.destinations.length > 0);
+
+  if (!entries.length) {
+    return <EmptyState icon="↶" title="Nothing backed up yet" text="Add a backup source, then its restore points appear here." />;
+  }
   return (
     <div className="page-stack">
-      <div className="page-title-row"><div><span className="eyebrow">Recovery</span><h2>Restore points</h2><p>Browse complete historical snapshots and restore one into a safe local folder.</p></div><Button variant="secondary" onClick={() => loadSnapshots(sourceName)}>Refresh</Button></div>
-      <section className="card restore-controls">
-        <div className="form-grid three">
-          <SelectField label="Restore job" value={sourceName} onChange={(event) => { setSourceName(event.target.value); setSnapshotId('latest'); }}>
-            {restoreSources.map((source) => <option key={source.name}>{source.name}</option>)}
-          </SelectField>
-          <SelectField label="Restore point" value={snapshotId} onChange={(event) => setSnapshotId(event.target.value)}>
-            <option value="latest">Latest available</option>{snapshots.map((snapshot) => <option value={snapshot.id} key={snapshot.id}>{displayDate(snapshot.createdAt)} · {snapshot.fileCount} files</option>)}
-          </SelectField>
-          <div className="field"><span className="field-label">Storage</span><div className="static-field">{snapshotsMeta || 'Load restore points'}</div></div>
+      <div className="page-title-row">
+        <div>
+          <span className="eyebrow">Recovery</span>
+          <h2>Restore points</h2>
+          <p>Every backup keeps its own history. Pick one and choose the day you want back.</p>
         </div>
-        <div className="path-row"><Field label="Restore destination" value={destination} onChange={(event) => setDestination(event.target.value)} /><Button variant="secondary" onClick={async () => { const selected = await chooseDirectory(destination); if (selected) setDestination(selected); }}>Browse</Button></div>
-        <div className="restore-warning"><strong>Safe restore</strong><span>Choose a separate folder. The engine blocks restoring over an active backup source.</span></div>
-        <Button onClick={() => startRestore({ sourceName, snapshotId, destPath: destination })} disabled={operation?.status === 'running'}>Start restore</Button>
-      </section>
-      <section className="card">
-        <div className="section-heading"><div><span className="eyebrow">Available history</span><h3>{snapshots.length} restore points</h3></div></div>
-        {snapshots.length ? <div className="snapshot-list">{snapshots.map((snapshot, index) => <button className={cx('snapshot-row', snapshotId === snapshot.id && 'selected')} key={snapshot.id} onClick={() => setSnapshotId(snapshot.id)}><span className="timeline-dot" /><div><strong>{index === 0 ? 'Latest · ' : ''}{displayDate(snapshot.createdAt)}</strong><span>{snapshot.source} · {snapshot.fileCount} files · {bytes(snapshot.totalBytes)}</span></div><span className="snapshot-id">{snapshot.id}</span></button>)}</div> : <EmptyState title="Load restore points" text="Choose a restore source and click Refresh." />}
-      </section>
+      </div>
+      <div className="source-grid">
+        {entries.map((entry) => (
+          <RestoreCard key={entry.key} entry={entry} onRestore={onRestore} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -572,9 +966,9 @@ function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, 
       </div>
       {!systemInfo?.packaged && <div className="credential-note">Auto-start is applied by the installed application. Development mode does not register a login item.</div>}
       {schedulerState?.errors?.length > 0 && <div className="scheduler-errors">{schedulerState.errors.map((error) => <span key={error}>{error}</span>)}</div>}
-      {schedulerState?.jobs?.length > 0 && <div className="schedule-list">{schedulerState.jobs.map((job) => <div key={`${job.label}-${job.expression}`}><strong>{job.label}</strong><span>{job.expression}</span><em>{job.timezone}</em></div>)}</div>}
+      {schedulerState?.jobs?.length > 0 && <div className="schedule-list">{schedulerState.jobs.map((job) => <div key={`${job.label}-${job.expression}`}><strong>{job.label}</strong><span>{describeSchedule(job.expression)}</span><em>{job.timezone}</em></div>)}</div>}
     </section>
-    <section className="card"><div className="section-heading"><div><span className="eyebrow">Automation</span><h3>Schedule & performance</h3></div></div><div className="form-grid three"><Field label="Backup cron" value={backup.schedule || ''} onChange={(event) => updateBackup({ schedule: event.target.value })} hint="Example: 0 20 * * * = daily at 8 PM" /><Field type="number" min="1" max="32" label="Concurrent transfers" value={backup.concurrency || 8} onChange={(event) => updateBackup({ concurrency: Number(event.target.value) })} /><Field type="number" min="1" label="Daily retention (days)" value={retention.keepDailyBackups || 30} onChange={(event) => updateRetention({ keepDailyBackups: Number(event.target.value) })} /></div></section>
+    <section className="card"><div className="section-heading"><div><span className="eyebrow">Automation</span><h3>Defaults &amp; performance</h3></div></div><div className="form-grid three"><TimezoneField value={backup.timezone} onChange={(event) => updateBackup({ timezone: event.target.value })} hint="Schedules run in this time zone." /><Field type="number" min="1" max="32" label="Concurrent transfers" value={backup.concurrency || 8} onChange={(event) => updateBackup({ concurrency: Number(event.target.value) })} /><Field type="number" min="1" max="30" label="Default restore history (days)" value={retention.keepDailyBackups || 30} onChange={(event) => updateRetention({ keepDailyBackups: Math.min(30, Math.max(1, Number(event.target.value) || 1)) })} hint="Used by storage profiles that do not set their own." /></div><span className="field-hint">Each backup source has its own schedule, set on the Backup &amp; restore page.</span></section>
     <section className="card"><div className="section-heading"><div><span className="eyebrow">Notifications</span><h3>Email reports</h3></div><label className="toggle"><input type="checkbox" checked={email.enabled === true} onChange={(event) => updateEmail({ enabled: event.target.checked })} /><span /></label></div><div className="form-grid three"><Field label="SMTP host" value={smtp.host || ''} onChange={(event) => updateSmtp({ host: event.target.value })} /><Field type="number" label="Port" value={smtp.port || 587} onChange={(event) => updateSmtp({ port: Number(event.target.value) })} /><Field label="Account" value={auth.user || ''} onChange={(event) => updateAuth({ user: event.target.value })} /><Field type="password" label="App password" value={auth.pass || ''} placeholder={config._secretStatus?.emailPassword ? 'Stored securely' : 'Enter app password'} onChange={(event) => updateAuth({ pass: event.target.value })} /><Field label="Send report to" value={email.to || ''} onChange={(event) => updateEmail({ to: event.target.value })} /><Field label="Subject" value={email.subject || ''} onChange={(event) => updateEmail({ subject: event.target.value })} /></div><div className={cx('credential-note', config._secretStatus?.emailPassword && 'credential-stored')}><span>{config._secretStatus?.emailPassword ? '✓' : '○'}</span>{config._secretStatus?.emailPassword ? 'SMTP password is stored in the operating system credential vault.' : 'The password will be moved to secure OS storage when saved.'}</div><div className="card-footer"><Button variant="secondary" busy={emailTesting} onClick={testEmail}>Send test email</Button></div></section>
     <section className="card"><div className="section-heading"><div><span className="eyebrow">Maintenance</span><h3>Updates</h3></div><Pill tone={updateState?.status === 'downloaded' ? 'success' : updateState?.status === 'error' ? 'warn' : 'neutral'}>{({ idle: 'Up to date', none: 'Up to date', checking: 'Checking…', available: 'Downloading', downloading: 'Downloading', downloaded: 'Ready to install', error: 'Check failed', unsupported: 'Installed app only' }[updateState?.status] || 'Up to date')}</Pill></div>
       <div className="preference-list">
@@ -589,21 +983,125 @@ function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, 
 }
 
 const STORAGE_OPTIONS = [
-  { type: 'managed', title: 'Managed cloud', desc: 'Our hosted, paid storage — no cloud account needed.', icon: 'BG' },
   { type: 'google_drive', title: 'Google Drive', desc: 'Back up to your own Google Drive account.', icon: 'G' },
   { type: 'local', title: 'Local / external drive', desc: 'A second drive or folder on this PC.', icon: 'L' },
-  { type: 'network', title: 'Network / NAS', desc: 'A shared folder or NAS device.', icon: 'N' },
-  { type: 's3', title: 'Amazon S3 / compatible', desc: 'AWS S3, Backblaze B2, Wasabi, R2, MinIO.', icon: 'S3' },
-  { type: 'azure_blob', title: 'Azure Blob', desc: 'Microsoft Azure Blob Storage.', icon: 'A' },
 ];
 
-const SCHEDULE_PRESETS = [
-  ['0 20 * * *', 'Every day at 8:00 PM'],
-  ['0 21 * * *', 'Every day at 9:00 PM'],
-  ['0 22 * * *', 'Every day at 10:00 PM'],
-  ['0 13 * * *', 'Every day at 1:00 PM'],
-  ['0 */6 * * *', 'Every 6 hours'],
-];
+const WEEKDAYS = [['1', 'Monday'], ['2', 'Tuesday'], ['3', 'Wednesday'], ['4', 'Thursday'], ['5', 'Friday'], ['6', 'Saturday'], ['0', 'Sunday']];
+const DEFAULT_SCHEDULE = '0 20 * * *';
+
+// Cron stays the stored format (the scheduler reads it); these translate it to
+// and from the day/time controls people actually understand.
+function parseSchedule(expr) {
+  const parts = String(expr || '').trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [minute, hour, dayOfMonth, month, weekday] = parts;
+  const base = { time: '20:00', weekday: '1', day: '1', everyHours: 6 };
+  const everyHours = /^\*\/(\d+)$/.exec(hour);
+  if (everyHours && minute === '0' && dayOfMonth === '*' && month === '*' && weekday === '*') {
+    return { ...base, frequency: 'hourly', everyHours: Number(everyHours[1]) };
+  }
+  if (month !== '*' || !/^\d{1,2}$/.test(minute) || !/^\d{1,2}$/.test(hour)) return null;
+  const time = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+  if (dayOfMonth === '*' && weekday === '*') return { ...base, frequency: 'daily', time };
+  if (dayOfMonth === '*' && /^[0-6]$/.test(weekday)) return { ...base, frequency: 'weekly', time, weekday };
+  if (weekday === '*' && /^\d{1,2}$/.test(dayOfMonth)) return { ...base, frequency: 'monthly', time, day: dayOfMonth };
+  return null;
+}
+
+function buildSchedule(parts) {
+  const [hour, minute] = String(parts.time || '20:00').split(':').map((n) => Number(n) || 0);
+  if (parts.frequency === 'hourly') return `0 */${parts.everyHours || 6} * * *`;
+  if (parts.frequency === 'weekly') return `${minute} ${hour} * * ${parts.weekday || '1'}`;
+  if (parts.frequency === 'monthly') return `${minute} ${hour} ${parts.day || '1'} * *`;
+  return `${minute} ${hour} * * *`;
+}
+
+function formatClock(time) {
+  const [hour, minute] = String(time || '').split(':').map(Number);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return time;
+  const suffix = hour < 12 ? 'AM' : 'PM';
+  const display = hour % 12 === 0 ? 12 : hour % 12;
+  return `${display}:${String(minute).padStart(2, '0')} ${suffix}`;
+}
+
+function ordinal(n) {
+  const value = Number(n);
+  const suffix = value % 10 === 1 && value !== 11 ? 'st' : value % 10 === 2 && value !== 12 ? 'nd' : value % 10 === 3 && value !== 13 ? 'rd' : 'th';
+  return `${value}${suffix}`;
+}
+
+function describeSchedule(expr) {
+  if (!expr) return 'No schedule';
+  const parts = parseSchedule(expr);
+  if (!parts) return `Advanced schedule (${expr})`;
+  if (parts.frequency === 'hourly') return `Every ${parts.everyHours} hours`;
+  if (parts.frequency === 'weekly') {
+    return `Every ${(WEEKDAYS.find(([value]) => value === parts.weekday) || [, 'Monday'])[1]} at ${formatClock(parts.time)}`;
+  }
+  if (parts.frequency === 'monthly') return `The ${ordinal(parts.day)} of every month at ${formatClock(parts.time)}`;
+  return `Every day at ${formatClock(parts.time)}`;
+}
+
+function ScheduleEditor({ value, onChange }) {
+  const parts = parseSchedule(value);
+  const [advanced, setAdvanced] = useState(!parts);
+  const current = parts || parseSchedule(DEFAULT_SCHEDULE);
+  const set = (patch) => onChange(buildSchedule({ ...current, ...patch }));
+
+  if (advanced) {
+    return (
+      <div className="schedule-editor">
+        <Field
+          label="Advanced schedule"
+          value={value || ''}
+          onChange={(event) => onChange(event.target.value)}
+          hint="Cron format: minute hour day month weekday"
+        />
+        <span className="field-hint">
+          {describeSchedule(value)}{' '}
+          <button type="button" className="link-button" onClick={() => { setAdvanced(false); if (!parts) onChange(DEFAULT_SCHEDULE); }}>
+            Use simple settings
+          </button>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="schedule-editor">
+      <div className="form-grid">
+        <SelectField label="How often" value={current.frequency} onChange={(event) => set({ frequency: event.target.value })}>
+          <option value="daily">Every day</option>
+          <option value="weekly">Every week</option>
+          <option value="monthly">Every month</option>
+          <option value="hourly">Every few hours</option>
+        </SelectField>
+        {current.frequency === 'hourly' ? (
+          <SelectField label="Run every" value={String(current.everyHours)} onChange={(event) => set({ everyHours: Number(event.target.value) })}>
+            {[1, 2, 3, 4, 6, 8, 12].map((n) => <option key={n} value={n}>{n} hours</option>)}
+          </SelectField>
+        ) : (
+          <Field type="time" label="At what time" value={current.time} onChange={(event) => set({ time: event.target.value })} />
+        )}
+        {current.frequency === 'weekly' && (
+          <SelectField label="On which day" value={current.weekday} onChange={(event) => set({ weekday: event.target.value })}>
+            {WEEKDAYS.map(([value_, label]) => <option key={value_} value={value_}>{label}</option>)}
+          </SelectField>
+        )}
+        {current.frequency === 'monthly' && (
+          <SelectField label="On which date" value={String(current.day)} onChange={(event) => set({ day: event.target.value })}>
+            {Array.from({ length: 28 }, (_, i) => String(i + 1)).map((day) => <option key={day} value={day}>{ordinal(day)}</option>)}
+          </SelectField>
+        )}
+      </div>
+      <span className="field-hint">
+        {describeSchedule(value)}{' '}
+        <button type="button" className="link-button" onClick={() => setAdvanced(true)}>Advanced</button>
+      </span>
+    </div>
+  );
+}
 
 const WIZARD_STEPS = ['Welcome', 'Data folder', 'Storage', 'Connect', 'Schedule', 'Notifications', 'First backup', 'Done'];
 
@@ -627,6 +1125,7 @@ function initWizardDraft(base) {
       controlPlaneUrl: '', licenseKey: '',
     },
     schedule: base.backup?.schedule || '0 20 * * *',
+    timezone: base.backup?.timezone || SYSTEM_TIMEZONE,
     retention: base.retention?.keepDailyBackups || 30,
     email: { enabled: false, to: '' },
   };
@@ -681,7 +1180,7 @@ function buildOnboardingConfig(base, draft, complete) {
   return {
     ...base,
     storageProfiles: { ...(base.storageProfiles || {}), primary: profile },
-    backup: { ...(base.backup || {}), sources: [backupSource, ...otherSources], schedule: draft.schedule || '0 20 * * *', concurrency: base.backup?.concurrency || 8 },
+    backup: { ...(base.backup || {}), sources: [backupSource, ...otherSources], schedule: draft.schedule || '0 20 * * *', timezone: draft.timezone || SYSTEM_TIMEZONE, concurrency: base.backup?.concurrency || 8 },
     retention: { ...(base.retention || {}), keepDailyBackups: Number(draft.retention) || 30 },
     email,
     onboarding: { completed: complete ? true : Boolean(base.onboarding?.completed), version: 1 },
@@ -756,7 +1255,6 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
   const lastStep = WIZARD_STEPS.length - 1;
   const chooseDirectory = (defaultPath) => api.chooseDirectory({ defaultPath });
   const setProvider = (updater) => setDraft((current) => ({ ...current, provider: typeof updater === 'function' ? updater(current.provider) : { ...current.provider, ...updater } }));
-  const scheduleValues = SCHEDULE_PRESETS.map(([value]) => value);
 
   const stepValid = (index) => {
     if (index === 1) return !!draft.tallyPath;
@@ -902,14 +1400,15 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
           <span className="eyebrow">Step 4</span>
           <h2>How often should we back up?</h2>
           <p>Pick a schedule and how many days of history to keep.</p>
-          <div className="form-grid">
-            <SelectField label="How often" value={scheduleValues.includes(draft.schedule) ? draft.schedule : 'custom'} onChange={(e) => { if (e.target.value !== 'custom') setDraft((d) => ({ ...d, schedule: e.target.value })); }}>
-              {SCHEDULE_PRESETS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              <option value="custom">Custom schedule…</option>
-            </SelectField>
-            <Field type="number" min="1" label="Days of history to keep" value={draft.retention} onChange={(e) => setDraft((d) => ({ ...d, retention: Number(e.target.value) }))} />
+          <ScheduleEditor value={draft.schedule} onChange={(next) => setDraft((d) => ({ ...d, schedule: next }))} />
+          <div className="form-grid" style={{ marginTop: 14 }}>
+            <TimezoneField
+              value={draft.timezone}
+              onChange={(e) => setDraft((d) => ({ ...d, timezone: e.target.value }))}
+              hint="Taken from this computer. Change it if your business runs elsewhere."
+            />
+            <Field type="number" min="1" max="30" label="Days of history to keep" value={draft.retention} onChange={(e) => setDraft((d) => ({ ...d, retention: Number(e.target.value) }))} />
           </div>
-          <Field label="Cron expression" value={draft.schedule} onChange={(e) => setDraft((d) => ({ ...d, schedule: e.target.value }))} hint="Advanced: standard cron format (minute hour day month weekday)." />
         </div>
       );
     }
@@ -948,7 +1447,8 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
         <div className="wizard-summary">
           <div><span>Data folder</span><strong>{draft.tallyPath || 'Not set'}</strong></div>
           <div><span>Storage</span><strong>{storageName(draft.provider.type)}</strong></div>
-          <div><span>Schedule</span><strong>{(SCHEDULE_PRESETS.find(([v]) => v === draft.schedule) || [])[1] || draft.schedule}</strong></div>
+          <div><span>Schedule</span><strong>{describeSchedule(draft.schedule)}</strong></div>
+          <div><span>Time zone</span><strong>{draft.timezone || SYSTEM_TIMEZONE}</strong></div>
           <div><span>History</span><strong>{draft.retention} days</strong></div>
           <div><span>Email reports</span><strong>{draft.email.enabled ? 'On' : 'Off'}</strong></div>
         </div>
@@ -1005,15 +1505,36 @@ export default function App() {
   const [snapshots, setSnapshots] = useState([]);
   const [snapshotsMeta, setSnapshotsMeta] = useState('');
   const [testingProfile, setTestingProfile] = useState('');
+  const [verifyingProfile, setVerifyingProfile] = useState('');
   const [emailTesting, setEmailTesting] = useState(false);
   const [toast, setToast] = useState(null);
   const [showWizard, setShowWizard] = useState(false);
   const [updateState, setUpdateState] = useState({ status: 'idle' });
   const [theme, setTheme] = useState(() => localStorage.getItem('bg-theme') || 'dark');
-  const [googleAccount, setGoogleAccount] = useState(null);
+  const [googleAccounts, setGoogleAccounts] = useState({});
+  const [session, setSession] = useState({ signedIn: false, user: null });
+  const [signingIn, setSigningIn] = useState(false);
+  const [repoConflict, setRepoConflict] = useState(null);
+  const [acceptingRepo, setAcceptingRepo] = useState(false);
 
-  const refreshGoogleAccount = () => {
-    Promise.resolve(api.getGoogleAccount?.()).then((info) => setGoogleAccount(info || null)).catch(() => {});
+  // Event subscriptions are registered once, so they must not close over the
+  // config from the first render (which is still null).
+  const configRef = useRef(config);
+  configRef.current = config;
+
+  // Each Drive profile can hold a different Google account.
+  const googleAccount = Object.values(googleAccounts).find(Boolean) || null;
+  const refreshGoogleAccount = (profileName, from = configRef.current) => {
+    const names = profileName
+      ? [profileName]
+      : Object.entries(from?.storageProfiles || {})
+          .filter(([, profile]) => profile.type === 'google_drive')
+          .map(([name]) => name);
+    names.forEach((name) => {
+      Promise.resolve(api.getGoogleAccount?.(name))
+        .then((info) => setGoogleAccounts((current) => ({ ...current, [name]: info || null })))
+        .catch(() => {});
+    });
   };
 
   useEffect(() => {
@@ -1038,9 +1559,11 @@ export default function App() {
         setSchedulerState(initialScheduler || { enabled: false, jobs: [], errors: [] });
         if (initialUpdate) setUpdateState(initialUpdate);
         if (!configResult.config.onboarding?.completed) setShowWizard(true);
+        refreshGoogleAccount(null, configResult.config);
       })
       .catch((error) => notify(error.message, 'error'));
-    refreshGoogleAccount();
+    Promise.resolve(api.getSession?.()).then((info) => info && setSession(info)).catch(() => {});
+    refreshHistory();
     const unsubProgress = api.onProgress((payload) => setProgress(payload));
     const unsubLog = api.onOperationLog((payload) => setOperationLogs((current) => [...current.slice(-249), payload.line]));
     const unsubState = api.onOperationState((state) => {
@@ -1051,6 +1574,7 @@ export default function App() {
       } else {
         notify(state.status === 'success' ? 'Operation completed successfully.' : 'Operation failed. Check Activity logs.', state.status === 'success' ? 'success' : 'error');
         api.getLogs(180).then(setLogs);
+        refreshHistory();
         refreshGoogleAccount();
       }
     });
@@ -1058,9 +1582,10 @@ export default function App() {
     const unsubUpdate = api.onUpdateState((state) => setUpdateState(state));
     const unsubAuth = api.onAuthState?.((state) => {
       notify(state.status === 'success' ? 'Google account connected.' : 'Google sign-in did not complete.', state.status === 'success' ? 'success' : 'error');
-      refreshGoogleAccount();
+      refreshGoogleAccount(state.profileName || undefined);
     });
-    return () => { unsubProgress(); unsubLog(); unsubState(); unsubScheduler(); unsubUpdate(); unsubAuth?.(); };
+    const unsubRepo = api.onRepoConflict?.((payload) => setRepoConflict(payload));
+    return () => { unsubProgress(); unsubLog(); unsubState(); unsubScheduler(); unsubUpdate(); unsubAuth?.(); unsubRepo?.(); };
   }, []);
 
   useEffect(() => {
@@ -1101,10 +1626,37 @@ export default function App() {
     finally { setSaving(false); }
   };
   const chooseDirectory = (defaultPath) => api.chooseDirectory({ defaultPath });
+  const openFolder = async (targetPath) => {
+    if (!targetPath) {
+      notify('No folder is set for this job yet.', 'error');
+      return;
+    }
+    // shell.openPath resolves to '' on success, or a message on failure.
+    const failure = await api.openPath(targetPath);
+    if (failure) notify(`Could not open ${targetPath}: ${failure}`, 'error');
+  };
   const startBackup = async (sourceName) => {
     try {
       if (!enabledBackupCount) throw new Error('Enable at least one backup source first.');
+      const blocked = (config.backup?.sources || [])
+        .filter((source) => source.enabled !== false && source.operation !== 'restore')
+        .filter((source) => !sourceName || source.name === sourceName)
+        .flatMap((source) => destinationsOf(source).map((profileName) => ({ source, profileName })))
+        .filter(({ profileName }) => {
+          const profile = (config.storageProfiles || {})[profileName];
+          return !profile || !SUPPORTED_PROVIDERS.includes(profile.type) || missingProfileFields(profile).length > 0;
+        });
+      if (blocked.length) {
+        const { source, profileName } = blocked[0];
+        const profile = (config.storageProfiles || {})[profileName];
+        throw new Error(
+          profile && !SUPPORTED_PROVIDERS.includes(profile.type)
+            ? `"${source.name}" cannot run: ${storageName(profile.type)} is not available yet.`
+            : `"${source.name}" cannot run: storage "${profileName}" is not finished. Open Storage and complete it.`
+        );
+      }
       await persistIfNeeded();
+      setPage('overview');
       await api.startOperation(sourceName ? { type: 'backup', sourceName } : { type: 'backup' });
     } catch (error) { notify(error.message, 'error'); }
   };
@@ -1114,9 +1666,101 @@ export default function App() {
       await api.startOperation({ type: 'restore', ...request });
     } catch (error) { notify(error.message, 'error'); }
   };
-  const startGoogleAuth = async () => {
-    try { await api.startOperation({ type: 'auth-google' }); }
+  const [restoreDialog, setRestoreDialog] = useState(null);
+  const [lastRestorePath, setLastRestorePath] = useState('');
+  const [runHistory, setRunHistory] = useState([]);
+  const refreshHistory = () => Promise.resolve(api.getRunHistory?.()).then((rows) => setRunHistory(rows || [])).catch(() => {});
+  const loadRestorePoints = async (profileName, source) => {
+    setRestoreDialog((current) => current && { ...current, profileName, loading: true, points: [], roots: [], selectedRoots: [] });
+    try {
+      const [result, defaultDir] = await Promise.all([
+        api.listSnapshotsByProfile(profileName),
+        api.getDefaultRestoreDir?.(source.name) ?? '',
+      ]);
+      const points = result.snapshots || [];
+      const newest = points[0];
+      setRestoreDialog((current) => current && ({
+        ...current,
+        loading: false,
+        points,
+        storageLabel: result.storageLabel,
+        snapshotId: newest?.id || '',
+        roots: rootLabels(newest),
+        selectedRoots: rootLabels(newest),
+        destPath: current.destPath || defaultDir,
+      }));
+    } catch (error) {
+      notify(error.message, 'error');
+      setRestoreDialog((current) => current && { ...current, loading: false, points: [] });
+    }
+  };
+  const openRestoreDialog = async (source, profileName) => {
+    const destinations = destinationsOf(source);
+    const chosen = profileName || destinations[0];
+    setRestoreDialog({
+      source,
+      destinations,
+      profileName: chosen,
+      points: [],
+      roots: [],
+      selectedRoots: [],
+      loading: true,
+      destPath: '',
+      snapshotId: '',
+    });
+    loadRestorePoints(chosen, source);
+  };
+  const chooseRestorePoint = async (snapshotId) => {
+    setRestoreDialog((current) => current && { ...current, snapshotId });
+    const { profileName } = restoreDialog;
+    try {
+      const detail = await api.getSnapshotDetail?.(profileName, snapshotId);
+      if (!detail) return;
+      const labels = rootLabels(detail);
+      setRestoreDialog((current) => current && ({ ...current, roots: labels, selectedRoots: labels }));
+    } catch { /* keep whatever the list already told us */ }
+  };
+  const runRestore = async () => {
+    const { source, profileName, snapshotId, destPath, roots, selectedRoots } = restoreDialog;
+    if (!destPath) { notify('Choose where to restore the files.', 'error'); return; }
+    if (roots.length > 1 && selectedRoots.length === 0) { notify('Choose at least one folder to restore.', 'error'); return; }
+    setRestoreDialog(null);
+    try {
+      await persistIfNeeded();
+      setLastRestorePath(destPath);
+      setPage('overview');
+      await api.startOperation({
+        type: 'restore',
+        profileName,
+        snapshotId,
+        destPath,
+        sourceName: source.name,
+        roots: roots.length > 1 && selectedRoots.length < roots.length ? selectedRoots : [],
+      });
+    } catch (error) { notify(error.message, 'error'); }
+  };
+
+  const signIn = async () => {
+    setSigningIn(true);
+    try {
+      setSession(await api.signIn());
+      notify('Signed in.');
+    } catch (error) { notify(error.message, 'error'); }
+    finally { setSigningIn(false); }
+  };
+  const cancelSignIn = async () => {
+    try { await api.cancelSignIn?.(); } catch { /* the flow may have finished already */ }
+    setSigningIn(false);
+  };
+  const signOut = async () => {
+    try { setSession(await api.signOut()); notify('Signed out. Backups continue to run.'); }
     catch (error) { notify(error.message, 'error'); }
+  };
+  const startGoogleAuth = async (profileName) => {
+    try {
+      await persistIfNeeded();
+      await api.startOperation({ type: 'auth-google', profileName });
+    } catch (error) { notify(error.message, 'error'); }
   };
   const testStorage = async (name) => {
     setTestingProfile(name);
@@ -1124,9 +1768,34 @@ export default function App() {
       await persistIfNeeded();
       const result = await api.testStorage(name);
       notify(`${storageName(result.profileType)} connection successful.`);
-      if (result.profileType === 'google_drive') refreshGoogleAccount();
+      if (result.profileType === 'google_drive') refreshGoogleAccount(name);
     } catch (error) { notify(error.message, 'error'); }
     finally { setTestingProfile(''); }
+  };
+  const verifyStorage = async (name) => {
+    setVerifyingProfile(name);
+    try {
+      await persistIfNeeded();
+      const result = await api.verifyRepository(name);
+      notify(
+        result.ok
+          ? result.checkedSnapshots
+            ? `Verified ${result.checkedSnapshots} restore point(s) — nothing missing.`
+            : 'Nothing backed up here yet, so there is nothing to check.'
+          : `${result.missingChunks} piece(s) of data are missing across ${result.damagedSnapshots.length} restore point(s).`,
+        result.ok ? 'success' : 'error'
+      );
+    } catch (error) { notify(error.message, 'error'); }
+    finally { setVerifyingProfile(''); }
+  };
+  const loadSnapshotsByProfile = async (profileName) => {
+    if (!profileName) { setSnapshots([]); setSnapshotsMeta(''); return; }
+    try {
+      await persistIfNeeded();
+      const result = await api.listSnapshotsByProfile(profileName);
+      setSnapshots(result.snapshots);
+      setSnapshotsMeta(result.storageLabel);
+    } catch (error) { setSnapshots([]); notify(error.message, 'error'); }
   };
   const loadSnapshots = async (sourceName) => {
     try { const result = await api.listSnapshots(sourceName); setSnapshots(result.snapshots); setSnapshotsMeta(result.storageLabel); }
@@ -1147,6 +1816,22 @@ export default function App() {
 
   if (!config) return <div className="loading-screen"><div className="brand-mark large">BG</div><div className="loading-bar"><span /></div><p>Preparing your backup workspace…</p></div>;
 
+  if (!session.signedIn) {
+    return (
+      <div className="loading-screen sign-in-screen">
+        <div className="brand-mark large">BG</div>
+        <h1>Backup Genie</h1>
+        <p>Sign in to manage your backups. Scheduled backups keep running either way.</p>
+        <div className="sign-in-actions">
+          <Button busy={signingIn} onClick={signIn}>Sign in with Google</Button>
+          {signingIn && <Button variant="secondary" onClick={cancelSignIn}>Cancel</Button>}
+        </div>
+        {signingIn && <p className="sign-in-hint">Finish signing in using the browser window that just opened.</p>}
+        {toast && <div className={cx('toast', toast.tone)}>{toast.message}</div>}
+      </div>
+    );
+  }
+
   if (showWizard) {
     return (
       <OnboardingWizard
@@ -1164,10 +1849,10 @@ export default function App() {
   }
 
   let content;
-  if (page === 'overview') content = <Overview {...{ config, operation, progress, operationLogs, startBackup, cancelOperation: api.cancelOperation, setPage }} />;
-  if (page === 'sources') content = <Sources {...{ config, setConfig, chooseDirectory, googleAccount }} />;
-  if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, startGoogleAuth, testingProfile, notify, googleAccount }} />;
-  if (page === 'restore') content = <Restore {...{ config, snapshots, snapshotsMeta, loadSnapshots, startRestore, chooseDirectory, operation }} />;
+  if (page === 'overview') content = <Overview {...{ config, operation, progress, operationLogs, startBackup, startRestore, cancelOperation: api.cancelOperation, setPage, openFolder, runHistory, refreshHistory, lastRestorePath }} />;
+  if (page === 'sources') content = <Sources {...{ config, setConfig, chooseDirectory, googleAccount, notify, openFolder, onRestore: openRestoreDialog }} />;
+  if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, verifyStorage, verifyingProfile, startGoogleAuth, testingProfile, notify, googleAccounts }} />;
+  if (page === 'restore') content = <Restore {...{ config, onRestore: openRestoreDialog, openFolder }} />;
   if (page === 'logs') content = <Logs {...{ logs, refreshLogs, operationLogs }} />;
   if (page === 'settings') content = <Settings {...{ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard: () => setShowWizard(true), updateState, checkForUpdates, installUpdate }} />;
 
@@ -1176,6 +1861,26 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">BG</div><div><strong>Backup Genie</strong><span>Business protection</span></div></div>
         <nav>{PAGES.map(([key, label, icon]) => <button key={key} className={cx(page === key && 'active')} onClick={() => setPage(key)}><span>{icon}</span>{label}</button>)}</nav>
+        <div className="sidebar-account">
+          {session.signedIn ? (
+            <>
+              <div className="account-avatar">{(session.user?.name || session.user?.email || '?').slice(0, 1).toUpperCase()}</div>
+              <div className="account-detail">
+                <strong title={session.user?.email}>{session.user?.name || session.user?.email}</strong>
+                <span title={session.user?.email}>{session.user?.email}</span>
+              </div>
+              <button type="button" className="link-button" onClick={signOut}>Sign out</button>
+            </>
+          ) : (
+            <>
+              <div className="account-detail">
+                <strong>Not signed in</strong>
+                <span>Backups still run as normal.</span>
+              </div>
+              <Button variant="secondary" busy={signingIn} onClick={signIn}>Sign in</Button>
+            </>
+          )}
+        </div>
         <div className="sidebar-status"><span className={cx('status-pulse', schedulerState.enabled ? '' : 'paused')} /><div><strong>{schedulerState.enabled ? 'Schedules active' : 'Schedules paused'}</strong><span>{schedulerState.jobs.length} jobs · Version {systemInfo?.version || '1.1.0'}</span></div></div>
       </aside>
       <main>
@@ -1196,6 +1901,131 @@ export default function App() {
         <div className="content">{content}</div>
       </main>
       {toast && <div className={cx('toast', `toast-${toast.tone}`)}><span>{toast.tone === 'error' ? '!' : '✓'}</span>{toast.message}</div>}
+      {restoreDialog && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <span className="eyebrow">Restore</span>
+            <h2>Restore “{restoreDialog.source.name}”</h2>
+            {restoreDialog.loading ? (
+              <p>Reading restore points from {restoreDialog.profileName}…</p>
+            ) : restoreDialog.points.length === 0 ? (
+              <p>No restore points found in {restoreDialog.profileName} yet. Run a backup first.</p>
+            ) : (
+              <>
+                <p>Pick the day you want back. Files are copied to a new folder, never over your live data.</p>
+                {restoreDialog.destinations.length > 1 && (
+                  <SelectField
+                    label="Restore from"
+                    value={restoreDialog.profileName}
+                    onChange={(event) => loadRestorePoints(event.target.value, restoreDialog.source)}
+                  >
+                    {restoreDialog.destinations.map((name, i) => (
+                      <option key={name} value={name}>{name}{i === 0 ? ' — main destination' : ' — copy'}</option>
+                    ))}
+                  </SelectField>
+                )}
+                <SelectField
+                  label="Restore point"
+                  value={restoreDialog.snapshotId}
+                  onChange={(event) => chooseRestorePoint(event.target.value)}
+                >
+                  {restoreDialog.points.map((point, i) => (
+                    <option key={point.id} value={point.id}>
+                      {displayDate(point.createdAt)}{i === 0 ? ' — most recent' : ''}
+                    </option>
+                  ))}
+                </SelectField>
+                {restoreDialog.roots.length > 1 && (
+                  <div className="field">
+                    <span className="field-label">Folders to restore</span>
+                    <div className="destination-list">
+                      {restoreDialog.roots.map((root) => (
+                        <label className="check-row" key={root}>
+                          <input
+                            type="checkbox"
+                            checked={restoreDialog.selectedRoots.includes(root)}
+                            onChange={(event) => setRestoreDialog((current) => ({
+                              ...current,
+                              selectedRoots: event.target.checked
+                                ? [...current.selectedRoots, root]
+                                : current.selectedRoots.filter((item) => item !== root),
+                            }))}
+                          />
+                          <span>{root}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <span className="field-hint">This backup covers several folders. Restore all of them, or just the one you need.</span>
+                  </div>
+                )}
+                <div className="path-row">
+                  <Field
+                    label="Restore into"
+                    value={restoreDialog.destPath}
+                    onChange={(event) => setRestoreDialog((current) => ({ ...current, destPath: event.target.value }))}
+                    hint="Defaults to your Downloads folder."
+                  />
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      const selected = await chooseDirectory(restoreDialog.destPath);
+                      if (selected) setRestoreDialog((current) => ({ ...current, destPath: selected }));
+                    }}
+                  >
+                    Browse
+                  </Button>
+                </div>
+              </>
+            )}
+            <div className="modal-actions">
+              <Button variant="secondary" onClick={() => setRestoreDialog(null)}>Cancel</Button>
+              {!restoreDialog.loading && restoreDialog.points.length > 0 && (
+                <Button onClick={runRestore}>Restore files</Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {repoConflict && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <span className="eyebrow warn">Backup stopped — action needed</span>
+            <h2>{repoConflict.status === 'missing' ? 'Your backup history was not found' : 'This destination holds a different backup'}</h2>
+            <p>
+              {repoConflict.status === 'missing'
+                ? <>The storage for <strong>{repoConflict.profileName}</strong> no longer contains the backup repository. It was most likely deleted, emptied, or moved.</>
+                : <>The storage for <strong>{repoConflict.profileName}</strong> now contains a different backup repository than this computer used before.</>}
+            </p>
+            <div className="modal-facts">
+              <div><span>Storage</span><strong>{repoConflict.storageLabel}</strong></div>
+              <div><span>Source</span><strong>{repoConflict.sourceName}</strong></div>
+            </div>
+            <div className="modal-note">
+              <strong>Your old restore points were not deleted by Backup Genie.</strong> They live in the original location. If the folder was removed by mistake, restore it (check the cloud provider's trash) or point this profile back at the original location — the history will reappear.
+            </div>
+            <p className="modal-warning">Starting a new history keeps your files safe going forward, but earlier restore points will no longer be listed for this source.</p>
+            <div className="modal-actions">
+              <Button variant="secondary" onClick={() => setRepoConflict(null)}>Cancel — I'll check the storage</Button>
+              <Button
+                busy={acceptingRepo}
+                onClick={async () => {
+                  setAcceptingRepo(true);
+                  try {
+                    await api.acceptRepository(repoConflict.profileName);
+                    setRepoConflict(null);
+                    notify('Starting a new backup history at this location.');
+                    await api.startOperation({ type: 'backup', sourceName: repoConflict.sourceName });
+                  } catch (error) {
+                    notify(error.message, 'error');
+                  } finally {
+                    setAcceptingRepo(false);
+                  }
+                }}
+              >Start a new backup history here</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

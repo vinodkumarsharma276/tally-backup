@@ -22,9 +22,15 @@ const configPathManager = require('../src/utils/ConfigPathManager');
 const GoogleDriveService = require('../src/GoogleDriveService');
 const EmailService = require('../src/EmailService');
 const SnapshotStore = require('../src/versioning/SnapshotStore');
+const VersionedBackup = require('../src/versioning/VersionedBackup');
+const { resolveObjectStore } = require('../src/versioning/createObjectStore');
 const { createBackend, testStorageProfile } = require('../src/versioning/backends');
 const { PROGRESS_PREFIX } = require('../src/utils/cliProgress');
 const { statusIconBuffer } = require('./trayIcon');
+const { acceptRepository } = require('../src/versioning/RepoMarker');
+const { googleConfigFor, hasOwnAccount, connectTokenRef } = require('../src/utils/googleAuth');
+const { signInWithGoogle, cancelSignIn } = require('./googleSignIn');
+const { readSession, saveSession, clearSession, deviceIdentity } = require('./session');
 const {
   migrateConfigSecrets,
   sanitizeConfigForRenderer,
@@ -50,6 +56,8 @@ let trayResetTimer = null;
 let closeHintShown = false;
 
 const START_HIDDEN = process.argv.includes('--hidden');
+// Schedules follow this machine unless the config names a zone.
+const SYSTEM_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) app.quit();
 
@@ -121,7 +129,12 @@ async function loadConfig() {
 }
 
 async function loadConfigForRenderer() {
-  return sanitizeConfigForRenderer(await loadConfig());
+  const sanitized = await sanitizeConfigForRenderer(await loadConfig());
+  // Profiles with a recorded repository are in use; the UI locks their provider.
+  const statePath = path.join(configPathManager.dataDir, 'repo-state.json');
+  const state = (await fs.readJson(statePath).catch(() => ({}))) || {};
+  sanitized._profilesInUse = Object.keys(state);
+  return sanitized;
 }
 
 async function saveConfig(submittedConfig) {
@@ -341,11 +354,21 @@ async function applyDesktopSettings(config) {
     ...(config.desktop || {}),
   };
   if (app.isPackaged) {
+    const openAtLogin = runtimeSettings.autoStart !== false;
     app.setLoginItemSettings({
-      openAtLogin: runtimeSettings.autoStart !== false,
+      openAtLogin,
       path: process.execPath,
       args: ['--hidden'],
     });
+    const applied = app.getLoginItemSettings({ path: process.execPath, args: ['--hidden'] });
+    if (applied.openAtLogin !== openAtLogin) {
+      await appendDesktopLog(
+        `Warning: Windows startup entry could not be ${openAtLogin ? 'created' : 'removed'}. ` +
+          'Scheduled backups only run while the app is open.'
+      );
+    } else {
+      await appendDesktopLog(`Start with Windows: ${openAtLogin ? 'enabled' : 'disabled'}.`);
+    }
   }
 }
 
@@ -407,39 +430,29 @@ async function configureSchedules(config) {
     (source) => source.operation === 'backup' && source.enabled !== false
   );
 
-  // A source with its own cron is scheduled individually; the rest fall under
-  // the global backup schedule.
-  const perSource = enabledBackups.filter((source) => source.schedule);
-  for (const source of perSource) {
-    const expression = source.schedule;
-    const timezone = source.timezone || config.backup?.timezone || 'Asia/Kolkata';
-    if (!cron.validate(expression)) {
-      errors.push(`Invalid schedule for ${source.name}: ${expression}`);
+  // Every backup source carries its own schedule(s); older configs fall back to
+  // the schedule that used to be global.
+  for (const source of enabledBackups) {
+    const expressions = Array.isArray(source.schedules) && source.schedules.length
+      ? source.schedules
+      : [source.schedule || config.backup?.schedule].filter(Boolean);
+    if (!expressions.length) {
+      errors.push(`No schedule set for ${source.name}`);
       continue;
     }
-    const task = cron.createTask(
-      expression,
-      () => dispatchScheduled('backup', { sourceName: source.name }),
-      { timezone }
-    );
-    task.start();
-    schedulerJobs.push({ label: `Backup: ${source.name}`, expression, timezone, task });
-  }
-
-  const usesGlobal = enabledBackups.filter((source) => !source.schedule);
-  if (usesGlobal.length > 0 && config.backup?.schedule) {
-    const expression = config.backup.schedule;
-    const timezone = config.backup.timezone || 'Asia/Kolkata';
-    if (cron.validate(expression)) {
-    const task = cron.createTask(
-      expression,
-      () => dispatchScheduled('backup', { sourceNames: usesGlobal.map((s) => s.name) }),
-      { timezone }
-    );
+    const timezone = source.timezone || config.backup?.timezone || SYSTEM_TIMEZONE;
+    for (const expression of expressions) {
+      if (!cron.validate(expression)) {
+        errors.push(`Invalid schedule for ${source.name}: ${expression}`);
+        continue;
+      }
+      const task = cron.createTask(
+        expression,
+        () => dispatchScheduled('backup', { sourceName: source.name }),
+        { timezone }
+      );
       task.start();
-      schedulerJobs.push({ label: `Daily backup (${usesGlobal.length} source(s))`, expression, timezone, task });
-    } else {
-      errors.push(`Invalid backup schedule: ${expression}`);
+      schedulerJobs.push({ label: `Backup: ${source.name}`, expression, timezone, task });
     }
   }
 
@@ -449,7 +462,7 @@ async function configureSchedules(config) {
   });
   for (const source of restores) {
     const expression = source.restore.schedule;
-    const timezone = source.restore.timezone || 'Asia/Kolkata';
+    const timezone = source.restore.timezone || config.backup?.timezone || SYSTEM_TIMEZONE;
     if (!cron.validate(expression)) {
       errors.push(`Invalid restore schedule for ${source.name}: ${expression}`);
       continue;
@@ -486,7 +499,7 @@ async function createSourceBackend(config, source) {
   const profile = profileFor(config, source);
   let driveService = null;
   if (!profile || profile.type === 'google_drive') {
-    driveService = new GoogleDriveService(config.googleDrive);
+    driveService = new GoogleDriveService(await googleConfigFor(config, source.storageProfile));
     await driveService.initialize();
   }
   return createBackend({ config, source, driveService });
@@ -512,6 +525,21 @@ function consumeOutput(stream, runId, streamName) {
     if (line.startsWith(PROGRESS_PREFIX)) {
       try {
         const progress = JSON.parse(line.slice(PROGRESS_PREFIX.length));
+        if (progress.kind === 'repo-conflict') {
+          emit('repo:conflict', progress);
+          appendDesktopLog(`Repository conflict (${progress.status}) for profile '${progress.profileName}'.`);
+          return;
+        }
+        if (progress.kind === 'anomaly') {
+          emit('operation:anomaly', progress);
+          appendDesktopLog(`Anomaly: ${progress.type} for '${progress.sourceName}' (${progress.percentReuploaded}% re-uploaded).`);
+          showNotification(
+            'Check your backup storage',
+            `${progress.sourceName}: ${progress.percentReuploaded}% of data was re-uploaded. The destination may have been reset.`,
+            'failed'
+          );
+          return;
+        }
         latestProgress = { runId, ...progress };
         emit('operation:progress', latestProgress);
         setTrayState('running', progressTooltip(progress, currentOperation));
@@ -538,14 +566,17 @@ function startChildOperation(type, args = {}) {
     for (const name of args.sourceNames || []) scriptArgs.push('--source', name);
   } else if (type === 'restore') {
     script = path.join(appRoot(), 'bin', 'versioned-restore.js');
-    if (!args.sourceName) throw new Error('Choose a restore source.');
-    scriptArgs.push('--source', args.sourceName);
+    if (!args.sourceName && !args.profileName) throw new Error('Choose what to restore.');
+    if (args.profileName) scriptArgs.push('--profile', args.profileName);
+    else scriptArgs.push('--source', args.sourceName);
     if (args.snapshotId) scriptArgs.push('--snapshot', args.snapshotId);
+    for (const root of args.roots || []) scriptArgs.push('--root', root);
     if (args.destPath) scriptArgs.push('--dest', args.destPath);
   } else if (type === 'auth-google') {
     script = path.join(appRoot(), 'tools', 'auth.js');
     scriptArgs.length = 0;
     scriptArgs.push('--config', configPath());
+    if (args.profileName) scriptArgs.push('--profile', args.profileName);
   } else {
     throw new Error(`Unsupported operation: ${type}`);
   }
@@ -585,9 +616,9 @@ function startChildOperation(type, args = {}) {
     emit('operation:log', { runId, stream: 'stderr', line: error.message });
     appendDesktopLog(`${type} process error: ${error.message}`);
   });
-  child.on('exit', (code, signal) => {
+  child.on('exit', async (code, signal) => {
     if (isAuth) {
-      emit('auth:state', { runId, status: code === 0 ? 'success' : 'failed', code });
+      emit('auth:state', { runId, status: code === 0 ? 'success' : 'failed', code, profileName: args.profileName || null });
       appendDesktopLog(`Google sign-in ${code === 0 ? 'completed' : 'failed'} (code=${code}).`);
       if (code === 0) showNotification('Google connected', 'Your Google account is now linked.', 'success');
       return;
@@ -601,8 +632,24 @@ function startChildOperation(type, args = {}) {
       signal,
       status: code === 0 ? 'success' : 'failed',
       completedAt: new Date().toISOString(),
+      destPath: args.destPath || null,
+      profileName: args.profileName || null,
     };
     currentOperation = null;
+    // Written before the UI is told, so a refresh sees this run.
+    await recordRun({
+      type,
+      status: completed.status,
+      origin: completed.origin,
+      sourceName: completed.sourceName,
+      profileName: completed.profileName,
+      destPath: completed.destPath,
+      startedAt,
+      completedAt: completed.completedAt,
+      durationMs: Date.now() - new Date(startedAt).getTime(),
+      files: latestProgress?.fileCount ?? latestProgress?.filesDone ?? null,
+      bytes: latestProgress?.newBytesStored ?? latestProgress?.processedBytes ?? null,
+    });
     emit('operation:state', completed);
     const description = type === 'restore' ? 'Restore' : 'Backup';
     if (code === 0) {
@@ -621,6 +668,28 @@ function startChildOperation(type, args = {}) {
   });
 
   return { runId, type, pid: child.pid, startedAt };
+}
+// Past runs, so the app can show a history that outlives the log files.
+const RUN_HISTORY_LIMIT = 500;
+
+function runHistoryPath() {
+  return path.join(configPathManager.dataDir, 'run-history.json');
+}
+
+async function readRunHistory() {
+  const history = await fs.readJson(runHistoryPath()).catch(() => []);
+  return Array.isArray(history) ? history : [];
+}
+
+async function recordRun(entry) {
+  try {
+    const history = await readRunHistory();
+    history.push(entry);
+    await fs.ensureDir(path.dirname(runHistoryPath()));
+    await fs.writeJson(runHistoryPath(), history.slice(-RUN_HISTORY_LIMIT), { spaces: 2 });
+  } catch (error) {
+    appendDesktopLog(`Could not record run history: ${error.message}`);
+  }
 }
 
 function safeStartOperation(type, args = {}) {
@@ -657,6 +726,21 @@ async function listSnapshots(sourceName) {
   return { storageLabel, snapshots: [...snapshots].reverse() };
 }
 
+async function listSnapshotsByProfile(profileName) {
+  const config = await loadConfig();
+  const profile = config.storageProfiles && config.storageProfiles[profileName];
+  if (!profile) throw new Error(`Storage profile not found: ${profileName}`);
+  const source = { storageProfile: profileName, backupFolderName: profile.rootFolderName || profileName };
+  let driveService = null;
+  if (profile.type === 'google_drive') {
+    driveService = new GoogleDriveService(await googleConfigFor(config, profileName));
+    await driveService.initialize();
+  }
+  const { backend, storageLabel } = await createBackend({ config, source, driveService });
+  const snapshots = await new SnapshotStore(backend).list();
+  return { storageLabel, snapshots: [...snapshots].reverse() };
+}
+
 async function testProfile(profileName) {
   const config = await loadConfig();
   const profile = config.storageProfiles && config.storageProfiles[profileName];
@@ -664,7 +748,7 @@ async function testProfile(profileName) {
   const source = { storageProfile: profileName, backupFolderName: profile.rootFolderName || profileName };
   let driveService = null;
   if (profile.type === 'google_drive') {
-    driveService = new GoogleDriveService(config.googleDrive);
+    driveService = new GoogleDriveService(await googleConfigFor(config, profileName));
     await driveService.initialize();
   }
   return testStorageProfile({ config, source, driveService });
@@ -699,12 +783,115 @@ function registerIpc() {
   );
   ipcMain.handle('scheduler:status', async () => schedulerState);
   ipcMain.handle('snapshots:list', async (_event, sourceName) => listSnapshots(sourceName));
+  ipcMain.handle('snapshots:list-by-profile', async (_event, profileName) => listSnapshotsByProfile(profileName));
+  ipcMain.handle('repo:verify', async (_event, profileName) => {
+    const config = await loadConfig();
+    const profile = config.storageProfiles && config.storageProfiles[profileName];
+    if (!profile) throw new Error(`Storage profile not found: ${profileName}`);
+    const source = { storageProfile: profileName, backupFolderName: profile.rootFolderName || profileName };
+    let driveService = null;
+    if (profile.type === 'google_drive') {
+      driveService = new GoogleDriveService(await googleConfigFor(config, profileName));
+      await driveService.initialize();
+    }
+    const { backend, storageLabel } = await createBackend({ config, source, driveService });
+    const engine = new VersionedBackup({
+      backend,
+      objectStore: await resolveObjectStore(backend, profile, { gzip: true }),
+      snapshotStore: new SnapshotStore(backend),
+      logger: { info: appendDesktopLog, warn: appendDesktopLog, error: appendDesktopLog },
+    });
+    const result = await engine.verify();
+    appendDesktopLog(`Verify '${profileName}': ${result.ok ? 'OK' : `${result.missingChunks} missing chunk(s)`}.`);
+    return { storageLabel, ...result };
+  });
+  ipcMain.handle('session:get', async () => readSession());
+  ipcMain.handle('session:sign-out', async () => {
+    appendDesktopLog('Signed out of Backup Genie account.');
+    return clearSession();
+  });
+  ipcMain.handle('session:sign-in', async () => {
+    const config = await loadConfig();
+    const controlPlaneUrl = config.account?.controlPlaneUrl || config.email?.relay?.controlPlaneUrl;
+    if (!controlPlaneUrl) throw new Error('No Backup Genie service address is configured, so sign-in is unavailable.');
+    // Reuse the OAuth client that already has the loopback redirect registered.
+    const credentials = await new GoogleDriveService(config.googleDrive || {}).loadCredentials();
+    const { idToken } = await signInWithGoogle(credentials);
+    const endpoint = `${controlPlaneUrl.replace(/\/$/, '')}/v1/auth/google`;
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idToken, device: await deviceIdentity(app.getVersion()) }),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (error) {
+      // Google accepted the sign-in; our own service is what could not be reached.
+      throw new Error(
+        `Signed in with Google, but the Backup Genie service at ${controlPlaneUrl} could not be reached ` +
+          `(${error.message}). Check your connection and try again. Your backups are unaffected.`
+      );
+    }
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'Sign-in failed.');
+    appendDesktopLog(`Signed in as ${body.user?.email || 'unknown account'}.`);
+    return saveSession({ token: body.token, user: body.user });
+  });
+  ipcMain.handle('session:sign-in-cancel', async () => cancelSignIn());
+  ipcMain.handle('system:default-restore-dir', async (_event, label) => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const name = `${label ? `${label} ` : ''}restore ${stamp}`.replace(/[\\/:*?"<>|]/g, '-');
+    return path.join(app.getPath('downloads'), name);
+  });
+  ipcMain.handle('snapshots:detail', async (_event, profileName, snapshotId) => {
+    const config = await loadConfig();
+    const profile = config.storageProfiles && config.storageProfiles[profileName];
+    if (!profile) throw new Error(`Storage profile not found: ${profileName}`);
+    const source = { storageProfile: profileName, backupFolderName: profile.rootFolderName || profileName };
+    let driveService = null;
+    if (profile.type === 'google_drive') {
+      driveService = new GoogleDriveService(await googleConfigFor(config, profileName));
+      await driveService.initialize();
+    }
+    const { backend } = await createBackend({ config, source, driveService });
+    const store = new SnapshotStore(backend);
+    const snapshot = await store.read(await store.resolveId(snapshotId));
+    return {
+      id: snapshot.id,
+      source: snapshot.source,
+      createdAt: snapshot.createdAt,
+      fileCount: snapshot.fileCount,
+      totalBytes: snapshot.totalBytes,
+      roots: snapshot.roots || [],
+    };
+  });
+  ipcMain.handle('history:get', async () => (await readRunHistory()).slice().reverse());
   ipcMain.handle('storage:test', async (_event, profileName) => testProfile(profileName));
-  ipcMain.handle('storage:google-account', async () => {
+  ipcMain.handle('repo:accept', async (_event, profileName) => {
+    const config = await loadConfig();
+    const profile = config.storageProfiles && config.storageProfiles[profileName];
+    if (!profile) throw new Error(`Storage profile not found: ${profileName}`);
+    const source = { storageProfile: profileName, backupFolderName: profile.rootFolderName || profileName };
+    let driveService = null;
+    if (profile.type === 'google_drive') {
+      driveService = new GoogleDriveService(await googleConfigFor(config, profileName));
+      await driveService.initialize();
+    }
+    const { backend } = await createBackend({ config, source, driveService });
+    const marker = await acceptRepository({
+      backend,
+      profileName,
+      statePath: path.join(configPathManager.dataDir, 'repo-state.json'),
+    });
+    appendDesktopLog(`Accepted repository ${marker.id} for profile '${profileName}'.`);
+    return { id: marker.id };
+  });
+  ipcMain.handle('storage:google-account', async (_event, profileName) => {
     try {
       const config = await loadConfig();
       if (!config.googleDrive) return null;
-      const service = new GoogleDriveService(config.googleDrive);
+      const service = new GoogleDriveService(await googleConfigFor(config, profileName));
       await service.initialize();
       const about = await service.drive.about.get({
         fields: 'user(emailAddress,displayName),storageQuota(limit,usage)',
@@ -715,6 +902,7 @@ function registerIpc() {
         name: data.user?.displayName || null,
         quotaUsed: Number(data.storageQuota?.usage || 0),
         quotaLimit: Number(data.storageQuota?.limit || 0),
+        ownAccount: await hasOwnAccount(config, profileName),
       };
     } catch (error) {
       return null;

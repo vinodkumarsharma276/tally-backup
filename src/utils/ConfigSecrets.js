@@ -167,6 +167,7 @@ async function storeOrPreserve(owner, previousOwner, key, account, changed) {
 async function secureConfigFromRenderer(submittedConfig, previousConfig, configPath) {
   const next = clone(submittedConfig);
   delete next._secretStatus;
+  delete next._profilesInUse;
   const changed = [];
   const scope = configScope(configPath);
 

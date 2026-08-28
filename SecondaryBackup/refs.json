@@ -1,0 +1,52 @@
+{
+  "latest": "2026-08-28T18-12-56-621Z",
+  "snapshots": [
+    {
+      "id": "2026-08-28T16-45-21-625Z",
+      "createdAt": "2026-08-28T16:45:21.626Z",
+      "source": "LLM Engineering",
+      "fileCount": 1605,
+      "totalBytes": 51283822
+    },
+    {
+      "id": "2026-08-28T17-02-31-621Z",
+      "createdAt": "2026-08-28T17:02:31.623Z",
+      "source": "LLM Engineering",
+      "fileCount": 1889,
+      "totalBytes": 55323411
+    },
+    {
+      "id": "2026-08-28T17-05-29-357Z",
+      "createdAt": "2026-08-28T17:05:29.358Z",
+      "source": "LLM Engineering",
+      "fileCount": 1889,
+      "totalBytes": 55323411
+    },
+    {
+      "id": "2026-08-28T17-50-48-998Z",
+      "createdAt": "2026-08-28T17:50:48.998Z",
+      "source": "LLM Engineering",
+      "fileCount": 1889,
+      "totalBytes": 55323411,
+      "roots": [
+        {
+          "path": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
+          "namespace": ""
+        }
+      ]
+    },
+    {
+      "id": "2026-08-28T18-12-56-621Z",
+      "createdAt": "2026-08-28T18:12:56.622Z",
+      "source": "LLM Engineering",
+      "fileCount": 1892,
+      "totalBytes": 55363358,
+      "roots": [
+        {
+          "path": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
+          "namespace": ""
+        }
+      ]
+    }
+  ]
+}

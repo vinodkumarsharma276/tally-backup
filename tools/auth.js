@@ -31,6 +31,7 @@ const { exec } = require('child_process');
 const { google } = require('googleapis');
 
 const GoogleDriveService = require('../src/GoogleDriveService');
+const { connectTokenRef } = require('../src/utils/googleAuth');
 const logger = require('../src/utils/logger');
 
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
@@ -122,7 +123,8 @@ function runLoopbackFlow(driveService, credentials) {
       driveService.auth = new google.auth.OAuth2(client_id, client_secret, redirectUri);
       const authUrl = driveService.auth.generateAuthUrl({
         access_type: 'offline',
-        prompt: 'consent', // force a refresh_token even on re-auth
+        // Always let the user pick which Google account this profile uses.
+        prompt: 'select_account consent',
         scope: SCOPES,
       });
       logger.info('Opening the Google authorisation page in your browser…');
@@ -137,7 +139,11 @@ function runLoopbackFlow(driveService, credentials) {
 
 async function main() {
   const config = await loadConfig();
-  const driveService = new GoogleDriveService(config.googleDrive);
+  const profileName = getArg('--profile');
+  // Each storage profile keeps its own Google account.
+  const googleConfig = { ...config.googleDrive, tokenPath: connectTokenRef(config, profileName) };
+  if (profileName) logger.info(`Connecting a Google account for storage profile '${profileName}'.`);
+  const driveService = new GoogleDriveService(googleConfig);
   const credentials = await driveService.loadCredentials();
   await runLoopbackFlow(driveService, credentials);
   logger.info('You can now run a backup.');

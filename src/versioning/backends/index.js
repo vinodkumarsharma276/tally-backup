@@ -197,7 +197,10 @@ async function createBackend({ config, source, driveService, flags = {} }) {
       flags.store ||
       (source && source.rootPath);
     if (!rootDir) {
-      throw new Error(`Storage profile '${profile.name || profileName}' requires rootDir/rootPath/path.`);
+      throw new Error(
+        `Storage profile '${profile.name || profileName}' is set to "${profile.type === 'network' ? 'Network share' : 'This computer'}" but has no folder. ` +
+          'Open Storage and set the folder, or correct the provider if this profile should use a different one.'
+      );
     }
     const session = await connectWindowsShare(profile, rootDir);
     const resolved = await assertWritableDirectory(rootDir);

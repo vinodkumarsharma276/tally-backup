@@ -18,6 +18,8 @@ class MemoryStore {
   constructor() {
     this.plans = new Map();
     this.tenants = new Map();
+    this.users = new Map();
+    this.devices = new Map();
   }
 
   async init() {
@@ -114,6 +116,30 @@ class MemoryStore {
       if (tenant.subscriptionId === subscriptionId) return tenant;
     }
     return null;
+  }
+
+  async upsertUser({ provider = 'google', providerSubject, email, name, picture }) {
+    const id = `${provider}:${providerSubject}`;
+    const existing = this.users.get(id) || { id, provider, providerSubject, createdAt: new Date().toISOString() };
+    const merged = { ...existing, email, name, picture, lastSeenAt: new Date().toISOString() };
+    this.users.set(id, merged);
+    return merged;
+  }
+
+  async getUser(id) {
+    return this.users.get(id) || null;
+  }
+
+  async upsertDevice({ id, userId, name, platform, appVersion }) {
+    const key = `${userId}:${id}`;
+    const existing = this.devices.get(key) || { id, userId, firstSeenAt: new Date().toISOString() };
+    const merged = { ...existing, name, platform, appVersion, lastSeenAt: new Date().toISOString() };
+    this.devices.set(key, merged);
+    return merged;
+  }
+
+  async listDevices(userId) {
+    return [...this.devices.values()].filter((device) => device.userId === userId);
   }
 
   async expireGracePeriods(nowMs = Date.now()) {

@@ -2,13 +2,15 @@
 'use strict';
 
 const path = require('path');
+const os = require('os');
 const fs = require('fs-extra');
 
 const logger = require('../src/utils/logger');
 const GoogleDriveService = require('../src/GoogleDriveService');
+const { googleConfigFor } = require('../src/utils/googleAuth');
 const EmailService = require('../src/EmailService');
 const Chunker = require('../src/versioning/Chunker');
-const { createObjectStore } = require('../src/versioning/createObjectStore');
+const { resolveObjectStore } = require('../src/versioning/createObjectStore');
 const SnapshotStore = require('../src/versioning/SnapshotStore');
 const { createBackend } = require('../src/versioning/backends');
 const VersionedBackup = require('../src/versioning/VersionedBackup');
@@ -30,8 +32,10 @@ function parseArgs(argv) {
     dryRun: false,
     force: false,
     sourceName: null,
+    profileName: null,
     snapshotId: null,
     destOverride: null,
+    roots: [],
     configPath: resolveConfigPath(argv),
   };
 
@@ -41,15 +45,13 @@ function parseArgs(argv) {
     else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '--force') opts.force = true;
     else if (arg === '--source' && argv[i + 1]) opts.sourceName = argv[++i];
+    else if (arg === '--profile' && argv[i + 1]) opts.profileName = argv[++i];
     else if (arg === '--snapshot' && argv[i + 1]) opts.snapshotId = argv[++i];
     else if (arg === '--dest' && argv[i + 1]) opts.destOverride = argv[++i];
+    else if (arg === '--root' && argv[i + 1]) opts.roots.push(argv[++i]);
     else if (arg === '--config' && argv[i + 1]) i += 1;
   }
   return opts;
-}
-
-function buildDriveLink(folderId) {
-  return `https://drive.google.com/drive/folders/${folderId}`;
 }
 
 function selectRestoreSources(config, sourceName, all) {
@@ -87,8 +89,20 @@ function validateRestoreDestination(config, sourceConfig, destPath, force) {
   return dest;
 }
 
-async function ensureWritableDest(dest) {
-  await fs.ensureDir(dest);
+// A restore driven straight from a storage profile, with no configured job.
+function adHocRestoreSource(config, profileName) {
+  const profile = (config.storageProfiles || {})[profileName];
+  if (!profile) throw new Error(`Storage profile not found: ${profileName}`);
+  return {
+    name: `Restore from ${profileName}`,
+    operation: 'restore',
+    storageProfile: profileName,
+    backupFolderName: profile.rootFolderName || profileName,
+    restore: {},
+  };
+}
+
+async function ensureWritableDest(dest) {  await fs.ensureDir(dest);
   const testFile = path.join(dest, '.tally-restore-write-test');
   await fs.writeFile(testFile, 'ok');
   await fs.remove(testFile);
@@ -113,24 +127,31 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   const concurrency = (config.backup && config.backup.concurrency) || 8;
-  const restoreSources = selectRestoreSources(config, opts.sourceName, opts.all);
+  // `--profile` restores any storage profile directly, so recovering a backup
+  // does not require a separate restore job to exist in the config.
+  const restoreSources = opts.profileName
+    ? [adHocRestoreSource(config, opts.profileName)]
+    : selectRestoreSources(config, opts.sourceName, opts.all);
   if (restoreSources.length === 0) {
     logger.warn('No enabled sources with operation "restore" found in config.');
     return { success: true, totalFilesProcessed: 0, totalSize: 0, sources: [], driveLinks: [] };
   }
 
   const startTime = Date.now();
-  const requiresDriveService = restoreSources.some((source) => {
-    const profileName = source.storageProfile;
+  // One Drive service per Google account, shared by the profiles that use it.
+  const driveServices = new Map();
+  const driveServiceFor = async (profileName) => {
     const profile = profileName && config.storageProfiles && config.storageProfiles[profileName];
-    return !profile || profile.type === 'google_drive';
-  });
-
-  let driveService = null;
-  if (requiresDriveService) {
-    driveService = new GoogleDriveService(config.googleDrive);
-    await driveService.initialize();
-  }
+    if (profile && profile.type !== 'google_drive') return null;
+    const googleConfig = await googleConfigFor(config, profileName);
+    const key = googleConfig.tokenPath || 'shared';
+    if (!driveServices.has(key)) {
+      const service = new GoogleDriveService(googleConfig);
+      await service.initialize();
+      driveServices.set(key, service);
+    }
+    return driveServices.get(key);
+  };
 
   const overall = {
     totalFilesProcessed: 0,
@@ -146,10 +167,13 @@ async function main(argv = process.argv.slice(2)) {
     for (const source of restoreSources) {
       const restoreCfg = source.restore || {};
       const snapshotId = opts.snapshotId || restoreCfg.snapshotId || 'latest';
+      // Restores never overwrite the original folder unless it was chosen.
+      const fallbackDest = source.sourcePath
+        || path.join(os.homedir(), 'Downloads', `Backup Genie restore ${new Date().toISOString().slice(0, 10)}`);
       const destPath = validateRestoreDestination(
         config,
         source,
-        opts.destOverride || source.sourcePath,
+        opts.destOverride || fallbackDest,
         opts.force
       );
 
@@ -160,13 +184,13 @@ async function main(argv = process.argv.slice(2)) {
       const { backend, storageLabel, profile } = await createBackend({
         config,
         source,
-        driveService,
+        driveService: await driveServiceFor(source.storageProfile),
       });
 
       const engine = new VersionedBackup({
         backend,
         chunker: new Chunker({ avg: CHUNK_AVG }),
-        objectStore: createObjectStore(backend, profile, { gzip: true }),
+        objectStore: await resolveObjectStore(backend, profile, { gzip: true }),
         snapshotStore: new SnapshotStore(backend),
         concurrency,
         logger,
@@ -174,15 +198,7 @@ async function main(argv = process.argv.slice(2)) {
 
       const resolvedSnapshotId = await engine.snapshotStore.resolveId(snapshotId);
       const snapshot = await engine.snapshotStore.read(resolvedSnapshotId);
-      const link = backend.rootFolderId ? buildDriveLink(backend.rootFolderId) : null;
-      if (link) {
-        overall.driveLinks.push({
-          name: source.name,
-          folderName: source.backupFolderName,
-          operation: 'restore',
-          link,
-        });
-      }
+      // No storage link here: a restore produces local files, not cloud ones.
 
       if (opts.dryRun) {
         logger.info(
@@ -198,7 +214,6 @@ async function main(argv = process.argv.slice(2)) {
           filesWritten: snapshot.fileCount,
           bytesWritten: snapshot.totalBytes,
           dryRun: true,
-          link,
         });
         overall.totalFilesProcessed += snapshot.fileCount;
         overall.totalFilesDownloaded += snapshot.fileCount;
@@ -213,6 +228,7 @@ async function main(argv = process.argv.slice(2)) {
       }
 
       const stats = await engine.restore(resolvedSnapshotId, destPath, {
+        roots: opts.roots,
         onProgress: renderRestoreProgress,
       });
       finishProgress();
@@ -220,7 +236,7 @@ async function main(argv = process.argv.slice(2)) {
       overall.totalFilesProcessed += stats.filesWritten;
       overall.totalFilesDownloaded += stats.filesWritten;
       overall.totalSize += stats.bytesWritten;
-      overall.sources.push({ name: source.name, operation: 'restore', storageLabel, ...stats, link });
+      overall.sources.push({ name: source.name, operation: 'restore', storageLabel, dest: destPath, ...stats });
 
       logger.info(
         `'${source.name}': restored snapshot ${stats.snapshotId} | ${stats.filesWritten} files, ` +

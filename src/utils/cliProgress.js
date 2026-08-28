@@ -9,6 +9,12 @@ function emitMachineProgress(operation, payload) {
   return true;
 }
 
+function emitMachineEvent(kind, payload) {
+  if (process.env.TALLY_PROGRESS_JSON !== '1') return false;
+  process.stdout.write(`${PROGRESS_PREFIX}${JSON.stringify({ kind, ...payload })}\n`);
+  return true;
+}
+
 function renderLine(line) {
   const cols = (process.stdout && process.stdout.columns) || 80;
   let output = line;
@@ -58,5 +64,6 @@ module.exports = {
   renderBackupProgress,
   renderRestoreProgress,
   finishProgress,
+  emitMachineEvent,
   PROGRESS_PREFIX,
 };

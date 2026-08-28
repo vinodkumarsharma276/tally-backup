@@ -59,6 +59,17 @@ async function main() {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  // A control plane must not disappear because of one bad request.
+  process.on('unhandledRejection', (reason) => {
+    console.error('[control-plane] unhandled rejection:', reason);
+  });
+  process.on('uncaughtException', (error) => {
+    console.error('[control-plane] uncaught exception:', error);
+  });
+  server.on('error', (error) => {
+    console.error('[control-plane] server error:', error.message);
+  });
 }
 
 if (require.main === module) {

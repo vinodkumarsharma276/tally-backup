@@ -28,11 +28,15 @@ const logger = require('../src/utils/logger');
 const GoogleDriveService = require('../src/GoogleDriveService');
 const { sendReport } = require('../src/utils/reportEmail');
 const Chunker = require('../src/versioning/Chunker');
-const { createObjectStore } = require('../src/versioning/createObjectStore');
+const { resolveObjectStore } = require('../src/versioning/createObjectStore');
 const SnapshotStore = require('../src/versioning/SnapshotStore');
 const { createBackend } = require('../src/versioning/backends');
+const { verifyRepository, acceptRepository, readMarker } = require('../src/versioning/RepoMarker');
+const { mirrorRepository } = require('../src/versioning/RepositoryMirror');
+const { googleConfigFor } = require('../src/utils/googleAuth');
+const configPathManager = require('../src/utils/ConfigPathManager');
 const VersionedBackup = require('../src/versioning/VersionedBackup');
-const { renderBackupProgress, finishProgress } = require('../src/utils/cliProgress');
+const { renderBackupProgress, finishProgress, emitMachineEvent } = require('../src/utils/cliProgress');
 
 const CHUNK_AVG = 256 * 1024; // locked in Phase 0
 const MB = 1048576;
@@ -52,6 +56,15 @@ function resolveSourceFilter(args = process.argv.slice(2)) {
   return names;
 }
 
+// A source may copy to one destination or several (the 3-2-1 pattern).
+// Older configs name a single profile in `storageProfile`.
+function destinationsOf(source) {
+  if (Array.isArray(source.storageProfiles) && source.storageProfiles.length) {
+    return source.storageProfiles;
+  }
+  return [source.storageProfile];
+}
+
 async function main(argv = process.argv.slice(2)) {
   const configPath = resolveConfigPath(argv);
   logger.info('='.repeat(60));
@@ -64,6 +77,9 @@ async function main(argv = process.argv.slice(2)) {
   }
   const config = await fs.readJson(configPath);
 
+  const forceNewRepository = argv.includes('--force-new-repository');
+  const repoStatePath = path.join(configPathManager.dataDir, 'repo-state.json');
+
   const onlySources = resolveSourceFilter(argv);
   const backupSources = (config.backup.sources || []).filter(
     (s) => s.operation === 'backup' && s.enabled !== false && (onlySources.length === 0 || onlySources.includes(s.name))
@@ -75,19 +91,28 @@ async function main(argv = process.argv.slice(2)) {
     logger.info(`Backing up only: ${backupSources.map((s) => s.name).join(', ')}.`);
   }
 
-  const requiresDriveService = backupSources.some((source) => {
-    const profileName = source.storageProfile;
+  // One Drive service per Google account, shared by the profiles that use it.
+  const driveServices = new Map();
+  const driveServiceFor = async (profileName) => {
     const profile = profileName && config.storageProfiles && config.storageProfiles[profileName];
-    return !profile || profile.type === 'google_drive';
-  });
+    if (profile && profile.type !== 'google_drive') return null;
+    const googleConfig = await googleConfigFor(config, profileName);
+    const key = googleConfig.tokenPath || 'shared';
+    if (!driveServices.has(key)) {
+      const service = new GoogleDriveService(googleConfig);
+      await service.initialize();
+      driveServices.set(key, service);
+    }
+    return driveServices.get(key);
+  };
 
-  let driveService = null;
-  if (requiresDriveService) {
-    driveService = new GoogleDriveService(config.googleDrive);
-    await driveService.initialize();
-  }
-
-  const keepDays = (config.retention && config.retention.keepDailyBackups) || 30;
+  const defaultKeepDays = (config.retention && config.retention.keepDailyBackups) || 30;
+  // Each destination may keep a different amount of history (1-30 days).
+  const keepDaysFor = (profileName) => {
+    const profile = (profileName && config.storageProfiles && config.storageProfiles[profileName]) || {};
+    const value = Number(profile.keepDailyBackups || defaultKeepDays);
+    return Math.min(30, Math.max(1, Number.isFinite(value) ? value : 30));
+  };
   const concurrency = (config.backup && config.backup.concurrency) || 8;
   const startTime = Date.now();
   let currentSource = null;
@@ -108,9 +133,21 @@ async function main(argv = process.argv.slice(2)) {
       logger.warn('No enabled sources with operation "backup" found in config.');
     }
 
-    for (const source of backupSources) {
-      currentSource = source;
+    for (const configuredSource of backupSources) {
+      // A source may write to one destination or several (the 3-2-1 pattern).
+      const destinations = destinationsOf(configuredSource);
+      // The first destination is backed up from the original files; the rest are
+      // mirrors of it, so the data is read and chunked only once.
+      const [primaryDestination, ...mirrorDestinations] = destinations;
+      const destinationResults = [];
       const sourceStarted = Date.now();
+      let primaryBackend = null;
+      let primaryStats = null;
+
+      {
+      const destination = primaryDestination;
+      const source = { ...configuredSource, storageProfile: destination };
+      currentSource = source;
       // A source may protect one folder (`sourcePath`) or several (`sourcePaths`,
       // each a path string or { path, label }).
       const sourceFolders = Array.isArray(source.sourcePaths) && source.sourcePaths.length
@@ -123,8 +160,9 @@ async function main(argv = process.argv.slice(2)) {
       const { backend, storageLabel, controlPlane, lease, profile } = await createBackend({
         config,
         source,
-        driveService,
+        driveService: await driveServiceFor(destination),
       });
+      primaryBackend = backend;
 
       if (lease && lease.writable === false) {
         // Managed storage is read-only (over quota or subscription lapsed).
@@ -138,10 +176,40 @@ async function main(argv = process.argv.slice(2)) {
         continue;
       }
 
+      const profileKey = source.storageProfile || storageLabel;
+      const repo = await verifyRepository({
+        backend,
+        profileName: profileKey,
+        statePath: repoStatePath,
+        adopt: true,
+      });
+      if (repo.status === 'missing' || repo.status === 'mismatch') {
+        if (!forceNewRepository) {
+          emitMachineEvent('repo-conflict', {
+            status: repo.status,
+            profileName: profileKey,
+            storageLabel,
+            sourceName: source.name,
+          });
+          throw new Error(
+            repo.status === 'missing'
+              ? `Backup repository not found at '${storageLabel}'. It looks like the destination was emptied, deleted or replaced. ` +
+                `Your previous restore points are NOT in this location. Point the profile back at the original location to recover them, ` +
+                `or re-run with --force-new-repository to start a brand-new backup history here.`
+              : `'${storageLabel}' now contains a different backup repository than '${profileKey}' used before. ` +
+                `Backing up here would start a separate history. Re-run with --force-new-repository to accept this location.`
+          );
+        }
+        await acceptRepository({ backend, profileName: profileKey, statePath: repoStatePath });
+        logger.warn(`Starting a NEW backup history at '${storageLabel}' (--force-new-repository).`);
+      } else if (repo.status === 'created') {
+        logger.info(`Initialised a new backup repository at '${storageLabel}'.`);
+      }
+
       const engine = new VersionedBackup({
         backend,
         chunker: new Chunker({ avg: CHUNK_AVG }),
-        objectStore: createObjectStore(backend, profile, { gzip: true }),
+        objectStore: await resolveObjectStore(backend, profile, { gzip: true }),
         snapshotStore: new SnapshotStore(backend),
         concurrency,
         logger,
@@ -151,8 +219,30 @@ async function main(argv = process.argv.slice(2)) {
         source: source.name,
         onProgress: renderBackupProgress,
       });
+      primaryStats = stats;
       finishProgress();
-      const gc = await engine.gc({ keepDays });
+      const gc = await engine.gc({ keepDays: keepDaysFor(destination) });
+
+      // An established repository re-uploading nearly everything usually means the
+      // destination lost its data even though the marker survived.
+      const reuploadRatio = stats.totalChunks > 0 ? stats.newChunks / stats.totalChunks : 0;
+      const anomaly =
+        repo.status === 'ok' && gc.keptSnapshots > 1 && stats.totalChunks > 20 && reuploadRatio > 0.95
+          ? 'possible-repository-reset'
+          : null;
+      if (anomaly) {
+        logger.warn(
+          `Possible repository reset for '${source.name}': ${(reuploadRatio * 100).toFixed(0)}% of data had to be ` +
+          `re-uploaded to '${storageLabel}' even though earlier restore points exist. Verify the destination.`
+        );
+        emitMachineEvent('anomaly', {
+          type: 'possible-repository-reset',
+          sourceName: source.name,
+          storageLabel,
+          percentReuploaded: Math.round(reuploadRatio * 100),
+        });
+      }
+
       const link = backend.rootFolderId
         ? `https://drive.google.com/drive/folders/${backend.rootFolderId}`
         : null;
@@ -171,7 +261,8 @@ async function main(argv = process.argv.slice(2)) {
       overall.totalNewChunks += stats.newChunks;
       overall.totalNewBytes += stats.newBytesStored;
       overall.totalSize += stats.totalBytes;
-      overall.sources.push({ name: source.name, storageLabel, ...stats, gc, link });
+      overall.sources.push({ name: source.name, storageLabel, ...stats, gc, link, anomaly });
+      destinationResults.push({ name: source.name, profileName: destination, storageLabel, role: 'primary', ...stats, gc, link, anomaly });
       if (link) {
         overall.driveLinks.push({
           name: source.name,
@@ -195,10 +286,128 @@ async function main(argv = process.argv.slice(2)) {
           totalNewBytes: stats.newBytesStored,
           totalSize: stats.totalBytes,
           duration: Date.now() - sourceStarted,
-          sources: [{ name: source.name, storageLabel, ...stats, gc, link }],
+          sources: [{ name: source.name, storageLabel, ...stats, gc, link, anomaly }],
           driveLinks: link ? [{ name: source.name, folderName: source.backupFolderName, operation: 'backup', link }] : [],
         };
-        await sendReport({ config, status: 'success', result: sourceResult, source });
+        if (!mirrorDestinations.length) {
+          await sendReport({ config, status: 'success', result: sourceResult, source });
+        }
+      }
+      }
+
+      for (const destination of mirrorDestinations) {
+        const mirrorSource = { ...configuredSource, storageProfile: destination };
+        currentSource = mirrorSource;
+        const mirrorStarted = Date.now();
+        const { backend: mirrorBackend, storageLabel: mirrorLabel } = await createBackend({
+          config,
+          source: mirrorSource,
+          driveService: await driveServiceFor(destination),
+        });
+        logger.info(`Copying '${configuredSource.name}' to '${destination}' (${mirrorLabel}).`);
+
+        const existingMarker = await readMarker(mirrorBackend);
+        const primaryMarker = await readMarker(primaryBackend);
+        const hasOwnHistory = await mirrorBackend.exists('refs.json').catch(() => false);
+        // Only refuse when the copy would overwrite a real, unrelated history.
+        if (
+          existingMarker && primaryMarker && existingMarker.id !== primaryMarker.id &&
+          hasOwnHistory && !forceNewRepository
+        ) {
+          emitMachineEvent('repo-conflict', {
+            status: 'mismatch',
+            profileName: destination,
+            storageLabel: mirrorLabel,
+            sourceName: configuredSource.name,
+          });
+          throw new Error(
+            `'${mirrorLabel}' already holds a different backup history, so it cannot be used as a copy of ` +
+              `'${primaryDestination}'. Choose an empty folder, or re-run with --force-new-repository to replace it.`
+          );
+        }
+
+        const mirrored = await mirrorRepository({
+          from: primaryBackend,
+          to: mirrorBackend,
+          logger,
+          onProgress: renderBackupProgress,
+        });
+        finishProgress();
+        // The copy now carries the primary's marker, so record that identity.
+        await acceptRepository({ backend: mirrorBackend, profileName: destination, statePath: repoStatePath });
+
+        // The copy inherits the main destination's history, so drop whatever the
+        // main destination has already pruned instead of accumulating orphans.
+        const mirrorEngine = new VersionedBackup({
+          backend: mirrorBackend,
+          objectStore: await resolveObjectStore(
+            mirrorBackend,
+            (config.storageProfiles && config.storageProfiles[destination]) || {},
+            { gzip: true }
+          ),
+          snapshotStore: new SnapshotStore(mirrorBackend),
+          logger,
+        });
+        const mirrorGc = await mirrorEngine.gc({ keepDays: keepDaysFor(primaryDestination) });
+
+        const mirrorLink = mirrorBackend.rootFolderId
+          ? `https://drive.google.com/drive/folders/${mirrorBackend.rootFolderId}`
+          : null;
+        overall.totalNewBytes += mirrored.bytes;
+        overall.sources.push({
+          name: configuredSource.name,
+          storageLabel: mirrorLabel,
+          mirroredFrom: primaryDestination,
+          newBytesStored: mirrored.bytes,
+          link: mirrorLink,
+        });
+        destinationResults.push({
+          name: configuredSource.name,
+          profileName: destination,
+          storageLabel: mirrorLabel,
+          role: 'copy',
+          mirroredFrom: primaryDestination,
+          objectsCopied: mirrored.copied,
+          newBytesStored: mirrored.bytes,
+          gc: mirrorGc,
+          totalBytes: primaryStats ? primaryStats.totalBytes : 0,
+          fileCount: primaryStats ? primaryStats.fileCount : 0,
+          duration: Date.now() - mirrorStarted,
+          link: mirrorLink,
+        });
+        if (mirrorLink) {
+          overall.driveLinks.push({
+            name: configuredSource.name,
+            folderName: mirrorSource.backupFolderName,
+            operation: 'backup',
+            link: mirrorLink,
+          });
+        }
+      }
+
+      if (config.email && mirrorDestinations.length && primaryStats) {
+        await sendReport({
+          config,
+          status: 'success',
+          source: configuredSource,
+          result: {
+            totalFilesProcessed: primaryStats.fileCount,
+            totalChunks: primaryStats.totalChunks,
+            totalNewChunks: primaryStats.newChunks,
+            totalNewBytes: destinationResults.reduce((sum, entry) => sum + (entry.newBytesStored || 0), 0),
+            totalSize: primaryStats.totalBytes,
+            duration: Date.now() - sourceStarted,
+            sources: destinationResults,
+            driveLinks: destinationResults
+              .filter((entry) => entry.link)
+              .map((entry) => ({
+                name: entry.name,
+                folderName: entry.storageLabel,
+                operation: 'backup',
+                link: entry.link,
+              })),
+          },
+        });
       }
     }
 

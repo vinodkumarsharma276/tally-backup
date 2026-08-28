@@ -238,15 +238,31 @@ class VersionedBackup {
    * Restore a snapshot ("latest" or an id) into `destDir` (must be empty/new).
    * Reassembles each file from its chunks; never writes to the live source.
    */
-  async restore(snapshotIdOrLatest, destDir, { onProgress } = {}) {
+  /**
+   * Restores a snapshot into `destDir`. `roots` limits the restore to the named
+   * folders from a multi-folder backup; omit it to restore everything.
+   */
+  async restore(snapshotIdOrLatest, destDir, { onProgress, roots = null } = {}) {
     const started = Date.now();
     const id = await this.snapshotStore.resolveId(snapshotIdOrLatest);
     const snapshot = await this.snapshotStore.read(id);
     const dest = path.resolve(destDir);
     await fs.ensureDir(dest);
 
-    const totalBytes = snapshot.totalBytes || 0;
-    const fileCount = Object.keys(snapshot.files).length;
+    const wanted = Array.isArray(roots) && roots.length ? new Set(roots) : null;
+    const entries = Object.entries(snapshot.files).filter(([rel]) => {
+      if (!wanted) return true;
+      const namespace = rel.includes('/') ? rel.slice(0, rel.indexOf('/')) : '';
+      return wanted.has(namespace);
+    });
+    if (wanted && entries.length === 0) {
+      throw new Error(`No files found for: ${[...wanted].join(', ')}`);
+    }
+
+    const totalBytes = wanted
+      ? entries.reduce((sum, [, meta]) => sum + (meta.size || 0), 0)
+      : snapshot.totalBytes || 0;
+    const fileCount = entries.length;
     const conc = this.concurrency;
     let filesWritten = 0;
     let bytesWritten = 0;
@@ -260,7 +276,7 @@ class VersionedBackup {
       }
     };
 
-    for (const [rel, meta] of Object.entries(snapshot.files)) {
+    for (const [rel, meta] of entries) {
       const outPath = path.join(dest, ...rel.split('/'));
       await fs.ensureDir(path.dirname(outPath));
       const handle = await fs.open(outPath, 'w');
@@ -304,6 +320,55 @@ class VersionedBackup {
   /** List snapshot summaries (oldest -> newest). */
   async list() {
     return this.snapshotStore.list();
+  }
+
+  /**
+   * Check that every chunk referenced by a surviving snapshot still exists.
+   * Catches partial deletion at the destination before a restore needs it.
+   */
+  async verify({ onProgress } = {}) {
+    const started = Date.now();
+    const refs = await this.snapshotStore.readRefs();
+    const stored = new Set(await this.objectStore.listHashes());
+
+    const missingBySnapshot = [];
+    const missingChunks = new Set();
+    let referenced = 0;
+    let checked = 0;
+
+    for (const entry of refs.snapshots) {
+      const snapshot = await this.snapshotStore.read(entry.id);
+      const missing = new Set();
+      for (const meta of Object.values(snapshot.files)) {
+        for (const hash of meta.chunks) {
+          referenced += 1;
+          if (!stored.has(hash)) {
+            missing.add(hash);
+            missingChunks.add(hash);
+          }
+        }
+      }
+      checked += 1;
+      if (missing.size) missingBySnapshot.push({ id: entry.id, createdAt: entry.createdAt, missingChunks: missing.size });
+      if (onProgress) onProgress({ checked, total: refs.snapshots.length });
+    }
+
+    const result = {
+      ok: missingChunks.size === 0,
+      snapshots: refs.snapshots.length,
+      checkedSnapshots: checked,
+      referencedChunks: referenced,
+      storedChunks: stored.size,
+      missingChunks: missingChunks.size,
+      damagedSnapshots: missingBySnapshot,
+      durationMs: Date.now() - started,
+    };
+    this.log[result.ok ? 'info' : 'error'](
+      result.ok
+        ? `Verify OK: ${checked} restore point(s), ${referenced} chunk references, nothing missing.`
+        : `Verify FAILED: ${missingChunks.size} chunk(s) missing across ${missingBySnapshot.length} restore point(s).`
+    );
+    return result;
   }
 
   /**
