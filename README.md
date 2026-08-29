@@ -58,3 +58,4 @@ For troubleshooting and advanced configuration, refer to the complete guide or c
 ## 📄 License
 
 Commercial license - All rights reserved.
+x
