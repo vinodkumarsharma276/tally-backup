@@ -1,13 +1,20 @@
 name: Release
 
-# Builds Windows + Linux installers on a version tag and publishes them together
-# in a single GitHub Release. Push a tag like v0.1.1 to trigger it.
+# Two ways to release, both of which run the full test suite first:
+#   1. Actions > Release > Run workflow, and enter a version (recommended).
+#      CI bumps package.json, commits, tags and publishes.
+#   2. Push a tag like v0.0.2 by hand.
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.0.2 (no leading v)'
+        required: true
+        type: string
   push:
     tags:
       - 'v*.*.*'
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,15 +31,61 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
       - name: Install dependencies
         run: npm ci
-      # A failing suite must stop the release before any installer is built.
+      # A failing suite stops the release before anything is tagged or built.
       - name: Run engine tests
         run: npm test
       - name: Run control plane tests
         working-directory: server
         run: npm ci && npm test
 
-  build:
+  prepare:
     needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve version and create tag
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            VERSION="${VERSION#v}"
+            TAG="v${VERSION}"
+
+            if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+              echo "::error::Tag ${TAG} already exists. Choose a new version, or delete the tag first."
+              exit 1
+            fi
+
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            npm version "${VERSION}" --no-git-tag-version
+            git add package.json package-lock.json
+            git commit -m "Release ${TAG}"
+            git tag -a "${TAG}" -m "Backup Genie ${VERSION}"
+            git push origin main
+            git push origin "${TAG}"
+
+            echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            TAG="${{ github.ref_name }}"
+            echo "ref=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${TAG}"
+
+  build:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -44,6 +97,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -57,18 +112,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Optional: inject the published Google OAuth client from a repo secret so
-      # "Connect Google" works in the shipped build. Skipped if the secret is unset.
-      - name: Inject Google OAuth client (optional)
+      # The published Google OAuth client, so "Connect Google" works in the
+      # shipped build. Without it Drive cannot be authorised.
+      - name: Inject Google OAuth client
         shell: bash
         env:
           GOOGLE_OAUTH_CLIENT: ${{ secrets.GOOGLE_OAUTH_CLIENT }}
         run: |
           if [ -n "${GOOGLE_OAUTH_CLIENT}" ]; then
             printf '%s' "${GOOGLE_OAUTH_CLIENT}" > config/google-oauth-client.json
-            echo "Injected config/google-oauth-client.json"
+            if node -e "if(!require('./config/google-oauth-client.json').installed.client_id) process.exit(1)"; then
+              echo "OAuth client injected."
+            else
+              echo "::error::GOOGLE_OAUTH_CLIENT is not valid JSON with installed.client_id."
+              exit 1
+            fi
           else
-            echo "No GOOGLE_OAUTH_CLIENT secret set; skipping."
+            echo "::warning::GOOGLE_OAUTH_CLIENT secret is not set; Connect Google will fail in this build."
           fi
 
       - name: Build UI
@@ -96,7 +156,7 @@ jobs:
             releases/desktop/latest-linux.yml
 
   publish:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
       - name: Download all build artifacts
@@ -107,8 +167,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
           draft: false
           prerelease: false
           fail_on_unmatched_files: false

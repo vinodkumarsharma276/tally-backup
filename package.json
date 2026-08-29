@@ -1,6 +1,6 @@
 {
   "name": "tally-backup-pro",
-  "version": "0.0.1",
+  "version": "0.0.0",
   "description": "Backup Genie — automated, versioned backup solution with incremental backup, deduplication, and scheduling to Google Drive, S3, NAS, and managed cloud.",
   "main": "index.js",
   "bin": {
