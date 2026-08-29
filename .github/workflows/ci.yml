@@ -1,0 +1,29 @@
+name: CI
+
+# Runs the test suites on every pull request so `main` is protected by a real
+# check, not just a review requirement.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # keytar (OS credential vault) needs libsecret to build on Linux.
+      - name: Install libsecret
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
+      - name: Install dependencies
+        run: npm ci
+      - name: Run engine tests
+        run: npm test
+      - name: Run control plane tests
+        working-directory: server
+        run: npm ci && npm test
