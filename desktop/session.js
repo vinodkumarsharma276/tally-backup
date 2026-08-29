@@ -42,7 +42,6 @@ async function readSession() {
   if (!cached || !cached.user) return { signedIn: false, user: null };
   return { signedIn: await hasSecret(TOKEN_ACCOUNT), user: cached.user, signedInAt: cached.signedInAt };
 }
-
 async function saveSession({ token, user }) {
   await setSecret(TOKEN_ACCOUNT, token);
   await fs.ensureDir(path.dirname(sessionFile()));

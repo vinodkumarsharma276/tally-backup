@@ -27,6 +27,31 @@
   "backup": {
     "sources": [
       {
+        "name": "Local backup copy",
+        "enabled": true,
+        "operation": "backup",
+        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
+        "storageProfile": "Tally Local Storage",
+        "mode": "mirror",
+        "storageProfiles": [
+          "Tally Local Storage"
+        ],
+        "sourcePaths": [
+          {
+            "path": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
+            "label": ""
+          }
+        ],
+        "schedules": [
+          "52 20 * * *"
+        ],
+        "schedule": "52 20 * * *",
+        "notifyTo": [
+          "vinodipdelhi@gmail.com",
+          "27shekhar1989@gmail.com"
+        ]
+      },
+      {
         "name": "LLM Engineering",
         "enabled": true,
         "operation": "backup",
@@ -80,12 +105,7 @@
   },
   "email": {
     "enabled": true,
-    "mode": "company",
-    "relay": {
-      "controlPlaneUrl": "http://localhost:8787",
-      "tenantId": "demo-tenant",
-      "licenseKey": "secret:config_test.email.relay.licenseKey"
-    },
+    "mode": "smtp",
     "smtp": {
       "host": "smtp.gmail.com",
       "port": 587,
@@ -95,7 +115,7 @@
         "pass": "secret:config_test.email.smtp.password"
       }
     },
-    "from": "vinodkhoraa@gmail.com",
+    "from": "vinodipdelhi@gmail.com",
     "to": "vinodipdelhi@gmail.com",
     "subject": "Backup Genie Report",
     "sendOnSuccess": true,

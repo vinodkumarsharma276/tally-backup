@@ -110,12 +110,23 @@ function validateConfig(config) {
     throw new Error('Configuration must contain backup.sources.');
   }
   const names = new Set();
-  for (const source of config.backup.sources) {
-    if (!source.name || !source.operation || !source.sourcePath) {
-      throw new Error('Every source requires name, operation, and sourcePath.');
-    }
+  for (const [index, source] of config.backup.sources.entries()) {
+    const label = source.name ? `"${source.name}"` : `Source ${index + 1}`;
+    if (!source.name) throw new Error(`${label} needs a display name.`);
+    if (!source.operation) throw new Error(`${label} needs to be set to Backup or Restore.`);
     if (!['backup', 'restore'].includes(source.operation)) {
       throw new Error(`Unsupported source operation: ${source.operation}`);
+    }
+    // A source may list one folder or several; at least one must be set.
+    const folders = Array.isArray(source.sourcePaths) && source.sourcePaths.length
+      ? source.sourcePaths.map((entry) => (typeof entry === 'string' ? entry : entry && entry.path))
+      : [source.sourcePath];
+    if (!folders.some((folder) => String(folder || '').trim())) {
+      throw new Error(
+        source.operation === 'restore'
+          ? `${label} needs a restore destination folder. Click Browse to choose one.`
+          : `${label} needs a folder to back up. Click Browse to choose one.`
+      );
     }
     if (names.has(source.name)) throw new Error(`Duplicate source name: ${source.name}`);
     names.add(source.name);
@@ -805,7 +816,11 @@ function registerIpc() {
     appendDesktopLog(`Verify '${profileName}': ${result.ok ? 'OK' : `${result.missingChunks} missing chunk(s)`}.`);
     return { storageLabel, ...result };
   });
-  ipcMain.handle('session:get', async () => readSession());
+  ipcMain.handle('session:get', async () => {
+    const config = await loadConfig();
+    const serviceUrl = config.account?.controlPlaneUrl || config.email?.relay?.controlPlaneUrl || '';
+    return { ...(await readSession()), serviceUrl, signInAvailable: !!serviceUrl };
+  });
   ipcMain.handle('session:sign-out', async () => {
     appendDesktopLog('Signed out of Backup Genie account.');
     return clearSession();
@@ -927,6 +942,8 @@ function registerIpc() {
     packaged: app.isPackaged,
     platform: process.platform,
     configPath: configPath(),
+    logsPath: logsDirectory(),
+    dataPath: configPathManager.dataDir,
     autoStart: app.isPackaged ? app.getLoginItemSettings().openAtLogin : false,
   }));
 }

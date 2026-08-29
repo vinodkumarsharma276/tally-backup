@@ -120,10 +120,16 @@ async function main(argv = process.argv.slice(2)) {
   }
   const config = await fs.readJson(opts.configPath);
 
+  // A mail problem must never stop a restore from running.
   let emailService = null;
-  if (config.email) {
-    emailService = new EmailService(config.email);
-    await emailService.initialize();
+  if (config.email && config.email.enabled && config.email.smtp && config.email.smtp.host) {
+    try {
+      emailService = new EmailService(config.email);
+      await emailService.initialize();
+    } catch (mailError) {
+      emailService = null;
+      logger.warn(`Email reports are unavailable: ${mailError.message}`);
+    }
   }
 
   const concurrency = (config.backup && config.backup.concurrency) || 8;

@@ -45,7 +45,7 @@
     "pack-npm": "npm pack",
     "pack-obfuscated": "npm run build-obfuscated",
     "publish-npm": "npm publish",
-    "test": "echo \"No tests specified\" && exit 1",
+    "test": "node scripts/run-tests.js",
     "test:packed": "node test/packed.test.js",
     "test:multi-source": "node test/multi-source.test.js",
     "test:repo-marker": "node test/repo-marker.test.js",

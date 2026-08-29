@@ -2,6 +2,9 @@ const path = require('path');
 const fs = require('fs-extra');
 const os = require('os');
 
+const APP_FOLDER = 'BackupGenie';
+const LEGACY_APP_FOLDER = 'TallyBackupApp';
+
 /**
  * Configuration Path Manager
  * Handles config file paths for both development and global npm installation
@@ -15,14 +18,26 @@ class ConfigPathManager {
       // For local development, use relative paths
       this.baseConfigDir = path.join(__dirname, '../..');
     } else {
-      // For npm installation (either global or local), use user's Documents/TallyBackupApp directory
-      this.baseConfigDir = path.join(os.homedir(), 'Documents', 'TallyBackupApp');
+      const documents = path.join(os.homedir(), 'Documents');
+      this.baseConfigDir = path.join(documents, APP_FOLDER);
+      ConfigPathManager._migrateLegacyFolder(path.join(documents, LEGACY_APP_FOLDER), this.baseConfigDir);
     }
     
     this.configDir = path.join(this.baseConfigDir, 'config');
     this.dataDir = path.join(this.baseConfigDir, 'data');
     this.logsDir = path.join(this.baseConfigDir, 'logs');
     this.tempDir = path.join(this.baseConfigDir, 'temp');
+  }
+
+  // Installs made before the rename keep their settings, history and state.
+  static _migrateLegacyFolder(legacyDir, targetDir) {
+    try {
+      if (!fs.pathExistsSync(legacyDir) || fs.pathExistsSync(targetDir)) return;
+      fs.moveSync(legacyDir, targetDir);
+    } catch {
+      // A locked file must never stop the app from starting; the old folder
+      // simply stays where it is and a fresh one is created.
+    }
   }
 
   /**

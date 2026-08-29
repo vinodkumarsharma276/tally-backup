@@ -381,11 +381,36 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, op
             <SelectField label="Operation" value={source.operation} onChange={(event) => update(index, { operation: event.target.value, restore: event.target.value === 'restore' ? (source.restore || { mode: 'manual', snapshotId: 'latest', cleanDest: false, timezone: 'Asia/Kolkata' }) : source.restore })}>
               <option value="backup">Backup</option><option value="restore">Restore</option>
             </SelectField>
+            {source.operation === 'backup' && (
+              <SelectField
+                label="Backup type"
+                value={source.mode === 'mirror' ? 'mirror' : 'versioned'}
+                onChange={(event) => {
+                  const mode = event.target.value === 'mirror' ? 'mirror' : 'versioned';
+                  if (mode !== 'mirror') { update(index, { mode }); return; }
+                  // Drop cloud destinations that an exact copy cannot write to.
+                  const kept = destinationsOf(source).filter((name) =>
+                    ['local', 'network'].includes((config.storageProfiles || {})[name]?.type)
+                  );
+                  update(index, { mode, storageProfiles: kept, storageProfile: kept[0] || '' });
+                }}
+              >
+                <option value="versioned">Versioned — keeps daily restore points</option>
+                <option value="mirror">Exact copy — a plain folder you can open</option>
+              </SelectField>
+            )}
             {source.operation === 'backup' ? (
               <div className="field">
                 <span className="field-label">Destinations</span>
                 <div className="destination-list">
-                  {profiles.map((profileName) => {
+                  {profiles
+                    .filter((profileName) => {
+                      // An exact copy writes plain files, so only folders qualify.
+                      if (source.mode !== 'mirror') return true;
+                      const type = (config.storageProfiles || {})[profileName]?.type;
+                      return type === 'local' || type === 'network';
+                    })
+                    .map((profileName) => {
                     const selected = destinationsOf(source);
                     const checked = selected.includes(profileName);
                     return (
@@ -405,10 +430,18 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, op
                     );
                   })}
                 </div>
+                {source.mode === 'mirror' && !profiles.some((name) => ['local', 'network'].includes((config.storageProfiles || {})[name]?.type)) && (
+                  <span className="field-hint warn">No folder storage yet. Add a local folder on the Storage page.</span>
+                )}
                 {destinationsOf(source).length > 1 && (
                   <span className="field-hint">This source is copied to {destinationsOf(source).length} destinations, each keeping its own restore points.</span>
                 )}
                 {destinationsOf(source).length === 0 && <span className="field-hint">Choose at least one destination.</span>}
+                {source.mode === 'mirror' && (
+                  <span className="field-hint warn">
+                    An exact copy needs a folder on this computer or a network share, and uses only the first destination.
+                  </span>
+                )}
               </div>
             ) : (
               <SelectField label="Restore from (storage)" value={source.storageProfile || ''} onChange={(event) => update(index, { storageProfile: event.target.value })}>
@@ -569,7 +602,7 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, op
             </div>
           )}
           <div className="card-footer">
-            {source.operation === 'backup' && destinationsOf(source).length > 0 && (
+            {source.operation === 'backup' && source.mode !== 'mirror' && destinationsOf(source).length > 0 && (
               <Button variant="secondary" onClick={() => onRestore(source)}>Restore this backup…</Button>
             )}
             <Button variant="danger-ghost" onClick={() => remove(index)}>Remove source</Button>
@@ -898,21 +931,28 @@ function rootLabels(snapshot) {
 
 function Restore({ config, onRestore, openFolder }) {
   // Restore points belong to backup jobs; a separate restore job is optional.
-  const backupSources = (config.backup?.sources || []).filter(
-    (source) => source.operation === 'backup' && destinationsOf(source).length > 0
-  );
+  // Only jobs that could actually hold restore points: enabled, versioned, and
+  // pointing at a storage profile that is finished being set up.
+  const usable = (profileName) => {
+    const profile = (config.storageProfiles || {})[profileName];
+    return !!profile && missingProfileFields(profile).length === 0;
+  };
+  const backupSources = (config.backup?.sources || [])
+    .filter((source) => source.operation === 'backup' && source.mode !== 'mirror' && source.enabled !== false)
+    .map((source) => ({ source, destinations: destinationsOf(source).filter(usable) }))
+    .filter((entry) => entry.destinations.length > 0);
   const restoreJobs = (config.backup?.sources || []).filter((source) => source.operation === 'restore' && source.enabled !== false);
   const entries = [
-    ...backupSources.map((source) => ({
+    ...backupSources.map(({ source, destinations }) => ({
       key: source.name,
       label: source.name,
-      destinations: destinationsOf(source),
+      destinations,
       source,
     })),
     ...restoreJobs.map((source) => ({
       key: `job:${source.name}`,
       label: `${source.name} (restore job)`,
-      destinations: [source.storageProfile].filter(Boolean),
+      destinations: [source.storageProfile].filter((name) => name && usable(name)),
       source,
     })),
   ].filter((entry) => entry.destinations.length > 0);
@@ -943,7 +983,7 @@ function Logs({ logs, refreshLogs, operationLogs }) {
   return <div className="page-stack"><div className="page-title-row"><div><span className="eyebrow">Diagnostics</span><h2>Activity logs</h2><p>Readable operational history for troubleshooting and support.</p></div><Button variant="secondary" onClick={refreshLogs}>Refresh logs</Button></div><section className="log-viewer">{lines.length ? lines.map((line, index) => <div className="log-line" key={`${index}-${line}`}><span>{String(index + 1).padStart(3, '0')}</span><code>{line}</code></div>) : <EmptyState title="No logs yet" text="Run a backup or storage test to see activity here." />}</section></div>;
 }
 
-function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard, updateState, checkForUpdates, installUpdate }) {
+function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard, updateState, checkForUpdates, installUpdate, openFolder }) {
   const backup = config.backup || {};
   const retention = config.retention || {};
   const email = config.email || {};
@@ -977,6 +1017,24 @@ function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, 
         {updateState?.status === 'downloaded' && <div className="credential-note credential-stored"><span>✓</span>Version {updateState.version} will install automatically when you quit, or click Restart to update now.</div>}
         {updateState?.status === 'error' && <div className="credential-note"><span>!</span>{updateState.error || 'Could not check for updates.'}</div>}
         {!systemInfo?.packaged && <div className="credential-note">Automatic updates are only active in the installed application.</div>}
+      </div>
+    </section>
+    <section className="card">
+      <div className="section-heading"><div><span className="eyebrow">Account</span><h3>Backup Genie service</h3></div></div>
+      <Field
+        label="Service address"
+        value={config.account?.controlPlaneUrl || ''}
+        placeholder="https://service.backupgenie.app"
+        onChange={(event) => setConfig((current) => ({ ...current, account: { ...current.account, controlPlaneUrl: event.target.value.trim() } }))}
+        hint="Needed only for signing in and syncing status. Backups run without it."
+      />
+    </section>
+    <section className="card">
+      <div className="section-heading"><div><span className="eyebrow">Diagnostics</span><h3>Files on this computer</h3></div></div>
+      <div className="preference-list">
+        <div className="preference-row"><div><strong>Logs</strong><span>{systemInfo?.logsPath || '—'}</span></div><Button variant="secondary" onClick={() => openFolder(systemInfo?.logsPath)}>Open</Button></div>
+        <div className="preference-row"><div><strong>Settings file</strong><span>{systemInfo?.configPath || '—'}</span></div><Button variant="secondary" onClick={() => openFolder(systemInfo?.configPath)}>Open</Button></div>
+        <div className="preference-row"><div><strong>App data</strong><span>{systemInfo?.dataPath || '—'}</span></div><Button variant="secondary" onClick={() => openFolder(systemInfo?.dataPath)}>Open</Button></div>
       </div>
     </section>
   </div>;
@@ -1118,6 +1176,8 @@ function initWizardDraft(base) {
   const src = (base.backup?.sources || []).find((s) => s.operation === 'backup');
   return {
     tallyPath: src?.sourcePath || '',
+    sourceName: src?.name || '',
+    sourceNameEdited: !!src?.name,
     provider: {
       type: 'google_drive', rootFolderName: 'Backup Genie', rootDir: '', bucket: '', region: 'ap-south-1',
       endpoint: '', prefix: 'backup-genie', accessKeyId: '', secretAccessKey: '', accountUrl: '', containerName: '',
@@ -1165,13 +1225,19 @@ function buildOnboardingConfig(base, draft, complete) {
     profile.auth = { licenseKey: p.licenseKey };
   }
 
-  const backupSource = { name: 'My Data', enabled: true, operation: 'backup', sourcePath: draft.tallyPath, storageProfile: 'primary' };
+  const backupSource = {
+    name: (draft.sourceName || '').trim() || defaultLabel(draft.tallyPath) || 'My Data',
+    enabled: true,
+    operation: 'backup',
+    sourcePath: draft.tallyPath,
+    storageProfile: 'primary',
+  };
   if (p.type === 'google_drive') backupSource.backupFolderName = p.rootFolderName || 'Backup Genie';
   const otherSources = (base.backup?.sources || []).filter((s) => s.name !== 'My Data');
 
   const email = draft.email.enabled
     ? {
-        ...(base.email || {}), enabled: true, mode: 'company',
+        ...(base.email || {}), enabled: true, mode: 'smtp',
         to: draft.email.to, subject: base.email?.subject || 'Backup Genie Report',
         sendOnSuccess: true, sendOnFailure: true, includeStats: true, includeDriveLink: true,
       }
@@ -1333,8 +1399,20 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
           <p>Select the folder that contains the data you want to protect (for example, your accounting or business data folder).</p>
           <div className="path-row">
             <Field label="Data folder" value={draft.tallyPath} onChange={(e) => setDraft((d) => ({ ...d, tallyPath: e.target.value }))} />
-            <Button variant="secondary" onClick={async () => { const s = await chooseDirectory(draft.tallyPath); if (s) setDraft((d) => ({ ...d, tallyPath: s })); }}>Browse</Button>
+            <Button variant="secondary" onClick={async () => {
+              const s = await chooseDirectory(draft.tallyPath);
+              if (!s) return;
+              // Name the job after the folder unless the user typed their own.
+              setDraft((d) => ({ ...d, tallyPath: s, sourceName: d.sourceNameEdited ? d.sourceName : defaultLabel(s) }));
+            }}>Browse</Button>
           </div>
+          <Field
+            label="Name this backup"
+            value={draft.sourceName}
+            placeholder={draft.tallyPath ? defaultLabel(draft.tallyPath) : 'My Data'}
+            onChange={(e) => setDraft((d) => ({ ...d, sourceName: e.target.value, sourceNameEdited: true }))}
+            hint="Shown in reports and on the Overview page, for example “Tally Data”."
+          />
           {priorTargets.length > 0 && (
             <div className="prior-targets">
               <strong>This folder is already backed up to:</strong>
@@ -1446,6 +1524,7 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
         <p>Backup Genie will protect your data on the schedule you chose and stay ready in the notification area.</p>
         <div className="wizard-summary">
           <div><span>Data folder</span><strong>{draft.tallyPath || 'Not set'}</strong></div>
+          <div><span>Backup name</span><strong>{(draft.sourceName || '').trim() || defaultLabel(draft.tallyPath) || 'My Data'}</strong></div>
           <div><span>Storage</span><strong>{storageName(draft.provider.type)}</strong></div>
           <div><span>Schedule</span><strong>{describeSchedule(draft.schedule)}</strong></div>
           <div><span>Time zone</span><strong>{draft.timezone || SYSTEM_TIMEZONE}</strong></div>
@@ -1513,6 +1592,7 @@ export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('bg-theme') || 'dark');
   const [googleAccounts, setGoogleAccounts] = useState({});
   const [session, setSession] = useState({ signedIn: false, user: null });
+  const [offlineMode, setOfflineMode] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [repoConflict, setRepoConflict] = useState(null);
   const [acceptingRepo, setAcceptingRepo] = useState(false);
@@ -1816,7 +1896,8 @@ export default function App() {
 
   if (!config) return <div className="loading-screen"><div className="brand-mark large">BG</div><div className="loading-bar"><span /></div><p>Preparing your backup workspace…</p></div>;
 
-  if (!session.signedIn) {
+  // Accounts are optional: with no service configured the app is fully usable.
+  if (!session.signedIn && !offlineMode && session.signInAvailable) {
     return (
       <div className="loading-screen sign-in-screen">
         <div className="brand-mark large">BG</div>
@@ -1824,7 +1905,9 @@ export default function App() {
         <p>Sign in to manage your backups. Scheduled backups keep running either way.</p>
         <div className="sign-in-actions">
           <Button busy={signingIn} onClick={signIn}>Sign in with Google</Button>
-          {signingIn && <Button variant="secondary" onClick={cancelSignIn}>Cancel</Button>}
+          {signingIn
+            ? <Button variant="secondary" onClick={cancelSignIn}>Cancel</Button>
+            : <Button variant="secondary" onClick={() => setOfflineMode(true)}>Continue offline</Button>}
         </div>
         {signingIn && <p className="sign-in-hint">Finish signing in using the browser window that just opened.</p>}
         {toast && <div className={cx('toast', toast.tone)}>{toast.message}</div>}
@@ -1854,7 +1937,7 @@ export default function App() {
   if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, verifyStorage, verifyingProfile, startGoogleAuth, testingProfile, notify, googleAccounts }} />;
   if (page === 'restore') content = <Restore {...{ config, onRestore: openRestoreDialog, openFolder }} />;
   if (page === 'logs') content = <Logs {...{ logs, refreshLogs, operationLogs }} />;
-  if (page === 'settings') content = <Settings {...{ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard: () => setShowWizard(true), updateState, checkForUpdates, installUpdate }} />;
+  if (page === 'settings') content = <Settings {...{ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard: () => setShowWizard(true), updateState, checkForUpdates, installUpdate, openFolder }} />;
 
   return (
     <div className="app-shell">
@@ -1869,9 +1952,9 @@ export default function App() {
                 <strong title={session.user?.email}>{session.user?.name || session.user?.email}</strong>
                 <span title={session.user?.email}>{session.user?.email}</span>
               </div>
-              <button type="button" className="link-button" onClick={signOut}>Sign out</button>
+              <button type="button" className="account-signout" onClick={signOut}>Sign out</button>
             </>
-          ) : (
+          ) : session.signInAvailable ? (
             <>
               <div className="account-detail">
                 <strong>Not signed in</strong>
@@ -1879,6 +1962,11 @@ export default function App() {
               </div>
               <Button variant="secondary" busy={signingIn} onClick={signIn}>Sign in</Button>
             </>
+          ) : (
+            <div className="account-detail">
+              <strong>This computer</strong>
+              <span>Backups run locally. No account needed.</span>
+            </div>
           )}
         </div>
         <div className="sidebar-status"><span className={cx('status-pulse', schedulerState.enabled ? '' : 'paused')} /><div><strong>{schedulerState.enabled ? 'Schedules active' : 'Schedules paused'}</strong><span>{schedulerState.jobs.length} jobs · Version {systemInfo?.version || '1.1.0'}</span></div></div>

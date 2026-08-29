@@ -46,6 +46,29 @@ main { min-width:0; overflow:hidden; }.topbar { height:80px; padding:0 36px; bor
 @media(min-width:1620px){.source-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .source-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end}
 .link-button{background:none;border:0;padding:0;font:inherit;color:#4fc39a;cursor:pointer;text-decoration:underline}
+.account-signout{border:1px solid #2a4250;background:transparent;color:#9fb3bd;border-radius:7px;padding:4px 9px;font:600 9.5px 'Manrope';cursor:pointer;flex:none;white-space:nowrap}
+.account-signout:hover{border-color:#3aae83;color:#d7e2e8}
+[data-theme='light'] .account-signout{border-color:#cfdae2;color:#5b6f7c}
+[data-theme='light'] .account-signout:hover{border-color:#2bbc7f;color:#16242e}
+
+/* Card footers: keep actions from touching each other. */
+.card-footer{gap:10px;flex-wrap:wrap}
+.restore-card .card-footer{justify-content:flex-end;gap:10px}
+
+/* Denser cards: the same information in less vertical space. */
+.source-grid .card{padding:15px}
+.source-grid .form-grid{gap:10px}
+.source-grid .subpanel{margin-top:11px;padding:10px 11px}
+.source-grid .source-editor-head{margin-bottom:11px}
+.source-grid .card-footer{margin-top:11px;padding-top:10px}
+.source-grid .field{gap:5px}
+.source-grid .field input,.source-grid .field select,.source-grid select{height:33px;font-size:10.5px}
+.source-grid .storage-facts{margin-top:11px;padding:10px 12px;gap:5px}
+.source-grid .storage-facts>div{grid-template-columns:96px minmax(0,1fr);gap:10px}
+.source-grid .path-row{margin-top:10px}
+.source-grid .folder-row{margin-top:8px}
+.storage-card .secret-fields{margin-top:10px}
+.storage-card .credential-note{margin-top:10px;padding:8px 10px}
 .history-list{display:flex;flex-direction:column}
 .history-row{display:flex;align-items:center;gap:12px;padding:11px 2px;border-bottom:1px solid #16262f}
 .history-row:last-child{border-bottom:0}

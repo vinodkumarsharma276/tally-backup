@@ -26,13 +26,14 @@ const fs = require('fs-extra');
 
 const logger = require('../src/utils/logger');
 const GoogleDriveService = require('../src/GoogleDriveService');
-const { sendReport } = require('../src/utils/reportEmail');
+const { sendReportSafely: sendReport } = require('../src/utils/reportEmail');
 const Chunker = require('../src/versioning/Chunker');
 const { resolveObjectStore } = require('../src/versioning/createObjectStore');
 const SnapshotStore = require('../src/versioning/SnapshotStore');
 const { createBackend } = require('../src/versioning/backends');
 const { verifyRepository, acceptRepository, readMarker } = require('../src/versioning/RepoMarker');
 const { mirrorRepository } = require('../src/versioning/RepositoryMirror');
+const MirrorBackup = require('../src/MirrorBackup');
 const { googleConfigFor } = require('../src/utils/googleAuth');
 const configPathManager = require('../src/utils/ConfigPathManager');
 const VersionedBackup = require('../src/versioning/VersionedBackup');
@@ -63,6 +64,71 @@ function destinationsOf(source) {
     return source.storageProfiles;
   }
   return [source.storageProfile];
+}
+
+// Plain folder-to-folder copy. Only local destinations make sense here: the
+// point is a copy the customer can open directly.
+async function runMirrorSource(config, source, overall) {
+  const profileName = destinationsOf(source)[0];
+  const profile = (config.storageProfiles || {})[profileName];
+  if (!profile) throw new Error(`Storage profile not found for '${source.name}': ${profileName}`);
+  if (profile.type !== 'local' && profile.type !== 'network') {
+    throw new Error(
+      `"${source.name}" makes an exact copy, which needs a folder on this computer or a network share. ` +
+        `"${profileName}" is ${profile.type}. Choose a local destination, or switch this source to versioned backup.`
+    );
+  }
+  const rootDir = profile.rootDir || profile.rootPath || profile.path;
+  if (!rootDir) throw new Error(`Storage profile '${profileName}' has no folder set.`);
+
+  const folders = Array.isArray(source.sourcePaths) && source.sourcePaths.length
+    ? source.sourcePaths
+    : [source.sourcePath];
+  const destRoot = path.join(rootDir, source.mirrorFolderName || source.name);
+  const startedAt = Date.now();
+
+  logger.info(
+    `Copying '${source.name}' from ${folders.map((f) => (typeof f === 'string' ? f : f.path)).join(', ')} -> ${destRoot}`
+  );
+
+  const stats = await new MirrorBackup({ logger }).run(folders, destRoot, {
+    prune: source.mirrorPrune === true,
+    onProgress: renderBackupProgress,
+  });
+  finishProgress();
+
+  logger.info(
+    `'${source.name}': ${stats.copiedFiles} file(s) copied, ${stats.skippedFiles} already current` +
+      `${stats.deletedFiles ? `, ${stats.deletedFiles} removed` : ''} | ${(stats.copiedBytes / MB).toFixed(2)} MB written`
+  );
+
+  const entry = {
+    name: source.name,
+    mode: 'mirror',
+    storageLabel: destRoot,
+    profileName,
+    dest: destRoot,
+    fileCount: stats.fileCount,
+    newBytesStored: stats.copiedBytes,
+    totalBytes: stats.totalBytes,
+    copiedFiles: stats.copiedFiles,
+    deletedFiles: stats.deletedFiles,
+  };
+  overall.totalFilesProcessed += stats.fileCount;
+  overall.totalNewBytes += stats.copiedBytes;
+  overall.totalSize += stats.totalBytes;
+  overall.sources.push(entry);
+
+  return {
+    totalFilesProcessed: stats.fileCount,
+    totalChunks: 0,
+    totalNewChunks: 0,
+    totalNewBytes: stats.copiedBytes,
+    totalSize: stats.totalBytes,
+    duration: Date.now() - startedAt,
+    sources: [entry],
+    driveLinks: [],
+  };
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -134,6 +200,16 @@ async function main(argv = process.argv.slice(2)) {
     }
 
     for (const configuredSource of backupSources) {
+      // An "exact copy" source is a plain folder copy with no history, so it
+      // bypasses the versioned engine entirely.
+      if (configuredSource.mode === 'mirror') {
+        const result = await runMirrorSource(config, configuredSource, overall);
+        if (config.email) {
+          await sendReport({ config, status: 'success', result, source: configuredSource });
+        }
+        continue;
+      }
+
       // A source may write to one destination or several (the 3-2-1 pattern).
       const destinations = destinationsOf(configuredSource);
       // The first destination is backed up from the original files; the rest are

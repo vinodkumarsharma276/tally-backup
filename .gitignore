@@ -28,6 +28,12 @@ logs/
 # Large local sample / test data — never commit (hundreds of MB, exceeds GitHub limits)
 Tally Data*/
 
+# Backup destinations created while testing. An exact-copy job pointed inside
+# the repo would otherwise add every copied file to git.
+SecondaryBackup/
+*Backup copy/
+BackupGenie-restore*/
+
 # Desktop build output (installers, blockmaps, update feeds) — CI rebuilds and
 # publishes these to GitHub Releases; never track them.
 releases/desktop/

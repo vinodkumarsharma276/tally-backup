@@ -97,10 +97,30 @@ async function sendReport({ config, status, result, error, source }) {
   }
 
   // Legacy customer-provided SMTP path.
+  if (recipients.length === 0) {
+    logger.warn('Email reports are on but no recipient is configured; skipping report.');
+    return;
+  }
+  if (!email.smtp || !email.smtp.host) {
+    logger.warn(
+      'Email reports are on but no mail server is configured. ' +
+        'Open Settings > Email reports and enter your email account details.'
+    );
+    return;
+  }
   const svc = new EmailService({ ...email, to: recipients.join(', ') });
   await svc.initialize();
   if (status === 'failure') await svc.sendBackupFailure(error, result);
   else await svc.sendBackupSuccessWithMultipleLinks(result, result && result.driveLinks);
 }
 
-module.exports = { sendReport, resolveRelayIdentity, recipientsFor };
+// A report that cannot be sent must never turn a good backup into a failure.
+async function sendReportSafely(options) {
+  try {
+    await sendReport(options);
+  } catch (error) {
+    logger.warn(`Report email could not be sent: ${error.message}`);
+  }
+}
+
+module.exports = { sendReport, sendReportSafely, resolveRelayIdentity, recipientsFor };

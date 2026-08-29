@@ -1,31 +1,16 @@
 {
+  "account": {
+    "controlPlaneUrl": ""
+  },
   "desktop": {
     "autoStart": true,
     "minimizeToTray": true,
     "notifications": true,
     "schedulerEnabled": true
   },
-  "storageProfiles": {
-    "local-backup": {
-      "type": "local",
-      "rootDir": ""
-    },
-    "google-drive": {
-      "type": "google_drive",
-      "rootFolderName": "Backup Genie"
-    }
-  },
+  "storageProfiles": {},
   "backup": {
-    "sources": [
-      {
-        "name": "My Data",
-        "enabled": false,
-        "operation": "backup",
-        "sourcePath": "",
-        "backupFolderName": "Backup Genie",
-        "storageProfile": "local-backup"
-      }
-    ],
+    "sources": [],
     "schedule": "0 20 * * *",
     "concurrency": 8,
     "compressionLevel": 6
