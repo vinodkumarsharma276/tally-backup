@@ -167,6 +167,18 @@ jobs:
         with:
           path: dist
 
+      # A copy with a fixed filename, so one permanent download link can be
+      # given to customers instead of a new URL for every release.
+      - name: Add stable-named installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXE=$(find dist -name 'Backup-Genie-Setup-*.exe' | head -n1)
+          if [ -n "${EXE}" ]; then
+            cp "${EXE}" "dist/Backup-Genie-Setup.exe"
+            echo "Stable copy: dist/Backup-Genie-Setup.exe"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
