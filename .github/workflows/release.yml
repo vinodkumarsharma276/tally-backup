@@ -72,11 +72,19 @@ jobs:
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-            npm version "${VERSION}" --no-git-tag-version
-            git add package.json package-lock.json
-            git commit -m "Release ${TAG}"
+            # The version may already match, e.g. re-releasing after a tag was
+            # deleted. Only commit when something actually changed.
+            CURRENT=$(node -p "require('./package.json').version")
+            if [ "${CURRENT}" != "${VERSION}" ]; then
+              npm version "${VERSION}" --no-git-tag-version
+              git add package.json package-lock.json
+              git commit -m "Release ${TAG}"
+              git push origin main
+            else
+              echo "package.json is already ${VERSION}; tagging the current commit."
+            fi
+
             git tag -a "${TAG}" -m "Backup Genie ${VERSION}"
-            git push origin main
             git push origin "${TAG}"
 
             echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
