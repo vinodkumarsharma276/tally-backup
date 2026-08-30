@@ -6,41 +6,26 @@
     "schedulerEnabled": true
   },
   "storageProfiles": {
-    "vinodipdelhi Google Drive": {
+    "Vinod Khora Google Drive": {
       "type": "google_drive",
-      "rootFolderName": "LLM engineering",
-      "secretId": "vinodipdelhi_Google_Drive",
-      "keepDailyBackups": 7
+      "rootFolderName": "TallyBackup-test-vinodkhora",
+      "keepDailyBackups": 17,
+      "secretId": "Vinod_Khora_Google_Drive"
     },
-    "Chandra Drive": {
+    "Vinod Electronics Google Drive": {
       "type": "google_drive",
-      "rootFolderName": "LLM Engineering",
-      "secretId": "LLM_Engineering",
-      "keepDailyBackups": 10
-    },
-    "Tally Local Storage": {
-      "type": "local",
-      "rootDir": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\SecondaryBackup",
-      "secretId": "Tally_Local_Storage"
-    },
-    "primary": {
-      "type": "google_drive",
-      "secretId": "primary",
-      "rootFolderName": "Backup Genie"
+      "rootFolderName": "TallyBackup-test-vinodelectronics",
+      "secretId": "Vinod_Electronics_Google_Drive"
     }
   },
   "backup": {
     "sources": [
       {
-        "name": "Local backup copy",
+        "name": "LLM Engineering Data",
         "enabled": true,
         "operation": "backup",
         "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
-        "storageProfile": "Tally Local Storage",
-        "mode": "mirror",
-        "storageProfiles": [
-          "Tally Local Storage"
-        ],
+        "storageProfile": "Vinod Khora Google Drive",
         "sourcePaths": [
           {
             "path": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
@@ -48,34 +33,16 @@
           }
         ],
         "schedules": [
-          "52 20 * * *"
+          "8 0 * * *"
         ],
-        "schedule": "52 20 * * *",
+        "schedule": "8 0 * * *",
         "notifyTo": [
-          "vinodipdelhi@gmail.com",
-          "27shekhar1989@gmail.com"
-        ]
-      },
-      {
-        "name": "LLM Engineering",
-        "enabled": true,
-        "operation": "backup",
-        "sourcePath": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
-        "storageProfile": "vinodipdelhi Google Drive",
+          "vinodkhoraa@gmail.com",
+          "vinodelectronics1994@gmail.com"
+        ],
         "storageProfiles": [
-          "vinodipdelhi Google Drive",
-          "Chandra Drive",
-          "Tally Local Storage"
-        ],
-        "sourcePaths": [
-          {
-            "path": "C:\\Users\\vinodsharma\\personal_workspace\\llm_engineering\\week1",
-            "label": ""
-          }
-        ],
-        "schedule": "46 18 * * *",
-        "schedules": [
-          "46 18 * * *"
+          "Vinod Khora Google Drive",
+          "Vinod Electronics Google Drive"
         ]
       }
     ],
@@ -109,7 +76,7 @@
     "maxSize": "10m"
   },
   "email": {
-    "enabled": false,
+    "enabled": true,
     "mode": "smtp",
     "smtp": {
       "host": "smtp.gmail.com",

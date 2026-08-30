@@ -93,7 +93,12 @@ async function runMirrorSource(config, source, overall) {
 
   const stats = await new MirrorBackup({ logger }).run(folders, destRoot, {
     prune: source.mirrorPrune === true,
-    onProgress: renderBackupProgress,
+    onProgress: (p) => renderBackupProgress({
+      ...p,
+      stageLabel: `Copying to ${profileName}`,
+      stage: 1,
+      stageCount: 1,
+    }),
   });
   finishProgress();
 
@@ -293,7 +298,13 @@ async function main(argv = process.argv.slice(2)) {
 
       const stats = await engine.backup(sourceFolders, {
         source: source.name,
-        onProgress: renderBackupProgress,
+        onProgress: (p) => renderBackupProgress({
+          ...p,
+          phase: 'backup',
+          stageLabel: `Backing up to ${destination}`,
+          stage: 1,
+          stageCount: destinations.length,
+        }),
       });
       primaryStats = stats;
       finishProgress();
@@ -406,7 +417,12 @@ async function main(argv = process.argv.slice(2)) {
           from: primaryBackend,
           to: mirrorBackend,
           logger,
-          onProgress: renderBackupProgress,
+          onProgress: (p) => renderBackupProgress({
+            ...p,
+            stageLabel: `Copying to ${destination}`,
+            stage: mirrorDestinations.indexOf(destination) + 2,
+            stageCount: destinations.length,
+          }),
         });
         finishProgress();
         // The copy now carries the primary's marker, so record that identity.

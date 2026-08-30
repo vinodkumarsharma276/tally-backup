@@ -49,6 +49,17 @@ main { min-width:0; overflow:hidden; }.topbar { height:80px; padding:0 36px; bor
 .wizard-error strong{font-size:12px;color:#f0a48f}
 .wizard-error span{font-size:11px;color:#d7c2bc;line-height:1.5}
 .wizard-footer>div{display:flex;gap:8px;align-items:center}
+.progress-stage{font-size:10px;color:#7f929e;display:block;margin-top:3px}
+.progress-topline-right{display:flex;align-items:center;gap:12px}
+.progress-fill.phase-copy{background:linear-gradient(90deg,#4aa3e0,#67c7f5)}
+/* Overall progress across every destination, so the bar resetting per stage
+   does not look like the run starting over. */
+.progress-ring{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;flex:none;
+  background:conic-gradient(#2bbc7f var(--ring,0%), rgba(120,150,165,.18) 0)}
+.progress-ring span{width:34px;height:34px;border-radius:50%;background:#0b1820;display:grid;place-items:center;font:700 9.5px 'Manrope';color:#d7e2e8}
+[data-theme='light'] .progress-ring span{background:#fff;color:#16242e}
+.save-bar{display:flex;align-items:center;gap:10px}
+.save-hint{font-size:10px;color:#e0a34a;white-space:nowrap}
 .link-button{background:none;border:0;padding:0;font:inherit;color:#4fc39a;cursor:pointer;text-decoration:underline}
 .account-signout{border:1px solid #2a4250;background:transparent;color:#9fb3bd;border-radius:7px;padding:4px 9px;font:600 9.5px 'Manrope';cursor:pointer;flex:none;white-space:nowrap}
 .account-signout:hover{border-color:#3aae83;color:#d7e2e8}

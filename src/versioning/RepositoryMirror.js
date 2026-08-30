@@ -23,6 +23,22 @@ async function mirrorRepository({ from, to, onProgress, logger }) {
   const dataKeys = await listRepositoryKeys(from);
   const stats = { copied: 0, skipped: 0, bytes: 0, total: dataKeys.length };
 
+  // Field names match the shared progress renderer; item counts stand in for
+  // bytes because a repository's total size is not known without reading it.
+  const report = () => {
+    if (!onProgress) return;
+    const done = stats.copied + stats.skipped;
+    onProgress({
+      phase: 'copy',
+      filesDone: done,
+      fileCount: stats.total,
+      processedBytes: done,
+      totalBytes: stats.total,
+      newBytesStored: stats.bytes,
+      unit: 'items',
+    });
+  };
+
   for (const key of dataKeys) {
     if (await to.exists(key).catch(() => false)) {
       stats.skipped += 1;
@@ -32,14 +48,7 @@ async function mirrorRepository({ from, to, onProgress, logger }) {
       stats.copied += 1;
       stats.bytes += buffer.length;
     }
-    if (onProgress) {
-      onProgress({
-        phase: 'mirror',
-        processed: stats.copied + stats.skipped,
-        total: stats.total,
-        bytes: stats.bytes,
-      });
-    }
+    report();
   }
 
   for (const key of POINTER_FILES) {

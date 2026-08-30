@@ -109,27 +109,63 @@ function EmptyState({ icon = '○', title, text, action }) {
   );
 }
 
+// Each page saves its own changes, so an error always belongs to the screen
+// the user is looking at.
+function SaveBar({ dirty, saving, onSave, label = 'Save changes' }) {
+  return (
+    <div className="save-bar">
+      {dirty && <span className="save-hint">You have unsaved changes on this page.</span>}
+      <Button variant={dirty ? 'primary' : 'secondary'} busy={saving} disabled={!dirty} onClick={onSave}>
+        {dirty ? label : 'Saved'}
+      </Button>
+    </div>
+  );
+}
+
 function ProgressPanel({ operation, progress, operationLogs, onCancel }) {
   if (!operation && !progress) return null;
   const total = Number(progress?.totalBytes || 0);
   const processed = Number(progress?.processedBytes || 0);
   const percent = total ? Math.min(100, (processed / total) * 100) : operation?.status === 'success' ? 100 : 0;
   const status = operation?.status || 'running';
+  const stage = Number(progress?.stage || 1);
+  const stageCount = Number(progress?.stageCount || 1);
+  // Each stage owns an equal slice of the run, so the ring never goes backwards.
+  const overall = status === 'success' ? 100 : Math.min(100, ((stage - 1) + percent / 100) / stageCount * 100);
+  const inItems = progress?.unit === 'items';
+  const phase = progress?.phase === 'copy' ? 'copy' : 'backup';
+
   return (
     <section className={cx('progress-panel', `progress-${status}`)}>
       <div className="progress-topline">
         <div>
           <div className="eyebrow">{operation?.type === 'restore' ? 'Restoring data' : 'Backup in progress'}</div>
-          <h3>{status === 'success' ? 'Completed successfully' : status === 'failed' ? 'Operation failed' : 'Your data is being protected'}</h3>
+          <h3>
+            {status === 'success' ? 'Completed successfully'
+              : status === 'failed' ? 'Operation failed'
+              : progress?.stageLabel || 'Your data is being protected'}
+          </h3>
+          {stageCount > 1 && status === 'running' && (
+            <span className="progress-stage">Step {stage} of {stageCount}</span>
+          )}
         </div>
-        {status === 'running' && <Button variant="ghost" onClick={onCancel}>Stop</Button>}
+        <div className="progress-topline-right">
+          {status === 'running' && stageCount > 1 && (
+            <div className="progress-ring" style={{ '--ring': `${overall}%` }} title="Overall progress">
+              <span>{Math.round(overall)}%</span>
+            </div>
+          )}
+          {status === 'running' && <Button variant="ghost" onClick={onCancel}>Stop</Button>}
+        </div>
       </div>
-      <div className="progress-track"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>
+      <div className="progress-track"><div className={cx('progress-fill', `phase-${phase}`)} style={{ width: `${percent}%` }} /></div>
       <div className="progress-metrics">
         <strong>{percent.toFixed(1)}%</strong>
-        <span>{bytes(processed)} of {bytes(total)}</span>
-        <span>{progress?.filesDone || 0} / {progress?.fileCount || 0} files</span>
-        {progress?.newBytesStored !== undefined && <span>{bytes(progress.newBytesStored)} uploaded</span>}
+        {inItems
+          ? <span>{processed} of {total} items</span>
+          : <span>{bytes(processed)} of {bytes(total)}</span>}
+        {!inItems && <span>{progress?.filesDone || 0} / {progress?.fileCount || 0} files</span>}
+        {progress?.newBytesStored !== undefined && <span>{bytes(progress.newBytesStored)} transferred</span>}
       </div>
       {operationLogs.length > 0 && <div className="progress-message">{operationLogs[operationLogs.length - 1]}</div>}
     </section>
@@ -314,7 +350,7 @@ function addFolder(list) {
   return foldersPatch([...list, { path: '', label: '' }]);
 }
 
-function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, openFolder, onRestore }) {
+function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, openFolder, onRestore, dirty, saving, onSave }) {
   const [snapshotOptions, setSnapshotOptions] = useState({});
   const [loadingSnapshots, setLoadingSnapshots] = useState('');
   const loadSnapshots = async (index, source) => {
@@ -369,7 +405,7 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, op
 
   return (
     <div className="page-stack">
-      <div className="page-title-row"><div><span className="eyebrow">Data jobs</span><h2>Backup & restore sources</h2><p>Choose what to protect, where to store it, and when restores should run.</p></div><Button onClick={add}>+ Add source</Button></div>
+      <div className="page-title-row"><div><span className="eyebrow">Data jobs</span><h2>Backup &amp; restore sources</h2><p>Choose what to protect, where to store it, and when restores should run.</p></div><div className="section-heading-actions"><SaveBar dirty={dirty} saving={saving} onSave={onSave} /><Button onClick={add}>+ Add source</Button></div></div>
       <div className="source-grid">
       {sources.map((source, index) => (
         <article className="card source-editor" key={`source-${index}`}>
@@ -695,13 +731,19 @@ function profileFacts(profile, googleAccount) {
   return facts;
 }
 
-function Storage({ config, setConfig, chooseDirectory, testStorage, verifyStorage, verifyingProfile, startGoogleAuth, testingProfile, notify, googleAccounts }) {
+function Storage({ config, setConfig, chooseDirectory, testStorage, verifyStorage, verifyingProfile, startGoogleAuth, testingProfile, notify, googleAccounts, dirty, saving, onSave }) {
   const profiles = config.storageProfiles || {};
   const secretStatus = config._secretStatus || { storageProfiles: {} };
   // A profile only becomes fixed once it has a backup history to protect.
   const profilesInUse = config._profilesInUse || [];
   const usedBy = (name) => (config.backup?.sources || []).filter((source) => destinationsOf(source).includes(name)).map((source) => source.name);
   // Extra copies mirror the main destination, so their own retention never applies.
+  // Exact copies keep no history, so retention does not apply to storage used
+  // only by those jobs.
+  const usedOnlyByCopies = (name) => {
+    const users = (config.backup?.sources || []).filter((source) => destinationsOf(source).includes(name));
+    return users.length > 0 && users.every((source) => source.mode === 'mirror');
+  };
   const usedAsCopy = (name) => (config.backup?.sources || []).some((source) => destinationsOf(source).indexOf(name) > 0);
   const removeProfile = (name) => {
     const inUse = usedBy(name);
@@ -773,6 +815,7 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, verifyStorag
       <div className="page-title-row">
         <div><span className="eyebrow">Destinations</span><h2>Storage</h2><p>Connect customer-owned storage and test access before a backup. The provider is chosen when you add a profile and cannot be changed later.</p></div>
         <div className="notify-actions">
+          <SaveBar dirty={dirty} saving={saving} onSave={onSave} />
           <Button variant="secondary" onClick={() => addProfile('google_drive')}>+ Google Drive</Button>
           <Button onClick={() => addProfile('local')}>+ Local folder</Button>
         </div>
@@ -811,20 +854,28 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, verifyStorag
               </div>
             ))}
             <div className="form-grid" style={{ marginTop: 12 }}>
-              <Field
-                type="number"
-                min="1"
-                max="30"
-                label="Restore history (days)"
-                value={profile.keepDailyBackups || config.retention?.keepDailyBackups || 30}
-                onChange={(event) => {
-                  const days = Math.min(30, Math.max(1, Number(event.target.value) || 1));
-                  update(name, { keepDailyBackups: days });
-                }}
-                hint={usedAsCopy(name)
-                  ? 'This storage is an extra copy, so it follows the main destination’s history.'
-                  : 'Restore points older than this are removed from this storage (1–30 days).'}
-              />
+              {usedOnlyByCopies(name) ? (
+                <div className="field">
+                  <span className="field-label">Restore history</span>
+                  <div className="static-field">Not applicable — this storage holds an exact copy</div>
+                  <span className="field-hint">An exact copy always matches the source, so there are no earlier days to restore.</span>
+                </div>
+              ) : (
+                <Field
+                  type="number"
+                  min="1"
+                  max="30"
+                  label="Restore history (days)"
+                  value={profile.keepDailyBackups || config.retention?.keepDailyBackups || 30}
+                  onChange={(event) => {
+                    const days = Math.min(30, Math.max(1, Number(event.target.value) || 1));
+                    update(name, { keepDailyBackups: days });
+                  }}
+                  hint={usedAsCopy(name)
+                    ? 'This storage is an extra copy, so it follows the main destination’s history.'
+                    : 'Restore points older than this are removed from this storage (1–30 days).'}
+                />
+              )}
             </div>
             {profile.type === 'network' && <div className="form-grid secret-fields"><Field label="Network username" value={profile.auth?.username || ''} onChange={(event) => updateAuth(name, { username: event.target.value })} /><Field type="password" label="Network password" value={profile.auth?.password || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter password'} onChange={(event) => updateAuth(name, { password: event.target.value })} /></div>}
             {profile.type === 's3' && <div className="form-grid secret-fields"><Field type="password" label="Access key ID" value={profile.auth?.accessKeyId || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter access key'} onChange={(event) => updateAuth(name, { accessKeyId: event.target.value })} /><Field type="password" label="Secret access key" value={profile.auth?.secretAccessKey || ''} placeholder={secretStatus.storageProfiles?.[name] ? 'Stored securely' : 'Enter secret key'} onChange={(event) => updateAuth(name, { secretAccessKey: event.target.value })} /></div>}
@@ -862,7 +913,7 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, verifyStorag
               <Button variant="danger-ghost" onClick={() => removeProfile(name)}>Remove</Button>
               <Button variant="secondary" busy={testingProfile === name} disabled={missingProfileFields(profile).length > 0} onClick={() => testStorage(name)}>Test connection</Button>
               <Button variant="secondary" busy={verifyingProfile === name} disabled={missingProfileFields(profile).length > 0} onClick={() => verifyStorage(name)}>Verify backup</Button>
-              {profile.type === 'google_drive' && <Button variant="ghost" onClick={() => startGoogleAuth(name)}>{googleAccounts[name]?.email ? 'Use another account' : 'Connect Google'}</Button>}
+              {profile.type === 'google_drive' && <Button variant={googleAccounts[name]?.email ? 'secondary' : 'primary'} onClick={() => startGoogleAuth(name)}>{googleAccounts[name]?.email ? 'Use another account' : 'Connect Google'}</Button>}
             </div>
           </article>
         ))}
@@ -985,7 +1036,7 @@ function Logs({ logs, refreshLogs, operationLogs }) {
   return <div className="page-stack"><div className="page-title-row"><div><span className="eyebrow">Diagnostics</span><h2>Activity logs</h2><p>Readable operational history for troubleshooting and support.</p></div><Button variant="secondary" onClick={refreshLogs}>Refresh logs</Button></div><section className="log-viewer">{lines.length ? lines.map((line, index) => <div className="log-line" key={`${index}-${line}`}><span>{String(index + 1).padStart(3, '0')}</span><code>{line}</code></div>) : <EmptyState title="No logs yet" text="Run a backup or storage test to see activity here." />}</section></div>;
 }
 
-function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard, updateState, checkForUpdates, installUpdate, openFolder }) {
+function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard, updateState, checkForUpdates, installUpdate, openFolder, dirty, saving, onSave }) {
   const backup = config.backup || {};
   const retention = config.retention || {};
   const email = config.email || {};
@@ -998,7 +1049,7 @@ function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, 
   const updateDesktop = (patch) => setConfig((current) => ({ ...current, desktop: { ...current.desktop, ...patch } }));
   const updateSmtp = (patch) => updateEmail({ smtp: { ...smtp, ...patch } });
   const updateAuth = (patch) => updateSmtp({ auth: { ...auth, ...patch } });
-  return <div className="page-stack"><div className="page-title-row"><div><span className="eyebrow">Preferences</span><h2>Settings</h2><p>Control backup timing, retention, concurrency, and notifications.</p></div></div>
+  return <div className="page-stack"><div className="page-title-row"><div><span className="eyebrow">Preferences</span><h2>Settings</h2><p>Control backup timing, retention, concurrency, and notifications.</p></div><SaveBar dirty={dirty} saving={saving} onSave={onSave} /></div>
     <section className="card"><div className="section-heading"><div><span className="eyebrow">Desktop behavior</span><h3>Tray & startup</h3></div><div className="section-heading-actions"><Button variant="secondary" onClick={onOpenWizard}>Re-run setup</Button><Pill tone={schedulerState?.enabled ? 'success' : 'neutral'}>{schedulerState?.enabled ? `${schedulerState.jobs.length} schedules active` : 'Schedules paused'}</Pill></div></div>
       <div className="preference-list">
         <label className="preference-row"><div><strong>Start when I sign into Windows</strong><span>Launch hidden in the notification area so scheduled backups can run.</span></div><label className="toggle"><input type="checkbox" checked={desktop.autoStart !== false} onChange={(event) => updateDesktop({ autoStart: event.target.checked })} /><span /></label></label>
@@ -1189,7 +1240,7 @@ function initWizardDraft(base) {
     schedule: base.backup?.schedule || '0 20 * * *',
     timezone: base.backup?.timezone || SYSTEM_TIMEZONE,
     retention: base.retention?.keepDailyBackups || 30,
-    email: { enabled: false, to: '' },
+    email: { enabled: false, to: '', user: '', pass: '' },
   };
 }
 
@@ -1240,6 +1291,16 @@ function buildOnboardingConfig(base, draft, complete) {
   const email = draft.email.enabled
     ? {
         ...(base.email || {}), enabled: true, mode: 'smtp',
+        // The customer's own mailbox: no shared credentials, and reports can be
+        // sent to any address.
+        smtp: {
+          ...(base.email?.smtp || {}),
+          host: 'smtp.gmail.com',
+          port: 587,
+          secure: false,
+          auth: { user: draft.email.user, pass: draft.email.pass },
+        },
+        from: draft.email.user,
         to: draft.email.to, subject: base.email?.subject || 'Backup Genie Report',
         sendOnSuccess: true, sendOnFailure: true, includeStats: true, includeDriveLink: true,
       }
@@ -1329,7 +1390,7 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
     if (index === 1) return !!draft.tallyPath;
     if (index === 3) return providerConfigured(draft.provider);
     if (index === 4) return !!draft.schedule;
-    if (index === 5) return !draft.email.enabled || !!draft.email.to;
+    if (index === 5) return !draft.email.enabled || (!!draft.email.to && !!draft.email.user && !!draft.email.pass);
     return true;
   };
   const canSkip = (index) => index === 5 || index === 6;
@@ -1487,7 +1548,7 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
           <div className="wizard-fields"><WizardProviderDetails provider={draft.provider} setProvider={setProvider} chooseDirectory={chooseDirectory} /></div>
           <div className="wizard-inline-actions">
             <Button variant="secondary" busy={testing} disabled={!providerConfigured(draft.provider)} onClick={runTest}>Test connection</Button>
-            {draft.provider.type === 'google_drive' && <Button variant="ghost" onClick={connectGoogle}>Connect Google</Button>}
+            {draft.provider.type === 'google_drive' && <Button variant="primary" onClick={connectGoogle}>Connect Google</Button>}
           </div>
           {testResult && <div className={cx('wizard-result', testResult.ok ? 'ok' : 'error')}><span>{testResult.ok ? '✓' : '!'}</span>{testResult.message}</div>}
           <div className="credential-note"><span>🔒</span>Any password, key, or token is stored in the operating system credential vault, never in plain text.</div>
@@ -1519,10 +1580,22 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
         <div className="wizard-step-body">
           <span className="eyebrow">Step 5 · Optional</span>
           <h2>Email reports</h2>
-          <p>Get a report emailed after each backup. Reports are sent from Backup Genie — you only need to provide your email address.</p>
-          <label className="preference-row"><div><strong>Email me backup reports</strong><span>We send them from Backup Genie to the address below.</span></div><label className="toggle"><input type="checkbox" checked={email.enabled} onChange={(e) => setEmail({ enabled: e.target.checked })} /><span /></label></label>
+          <p>Get a report after every backup. Reports are sent from your own email account, so they arrive from an address your team already trusts.</p>
+          <label className="preference-row"><div><strong>Email me backup reports</strong><span>Sent from your email account to the address below.</span></div><label className="toggle"><input type="checkbox" checked={email.enabled} onChange={(e) => setEmail({ enabled: e.target.checked })} /><span /></label></label>
           {email.enabled && (
-            <Field label="Send reports to" value={email.to} onChange={(e) => setEmail({ to: e.target.value })} hint="The email address where you want to receive backup reports." />
+            <>
+              <div className="form-grid">
+                <Field label="Send reports to" value={email.to} onChange={(e) => setEmail({ to: e.target.value })} hint="Where reports should arrive." />
+                <Field label="Send from (your Gmail address)" value={email.user} onChange={(e) => setEmail({ user: e.target.value })} hint="The account used to send the report." />
+              </div>
+              <Field
+                type="password"
+                label="Gmail App Password"
+                value={email.pass}
+                onChange={(e) => setEmail({ pass: e.target.value })}
+                hint="Not your normal password. In your Google Account go to Security > 2-Step Verification > App passwords, create one, and paste the 16 characters here. It is stored in Windows Credential Manager."
+              />
+            </>
           )}
         </div>
       );
@@ -1966,11 +2039,11 @@ export default function App() {
 
   let content;
   if (page === 'overview') content = <Overview {...{ config, operation, progress, operationLogs, startBackup, startRestore, cancelOperation: api.cancelOperation, setPage, openFolder, runHistory, refreshHistory, lastRestorePath }} />;
-  if (page === 'sources') content = <Sources {...{ config, setConfig, chooseDirectory, googleAccount, notify, openFolder, onRestore: openRestoreDialog }} />;
-  if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, verifyStorage, verifyingProfile, startGoogleAuth, testingProfile, notify, googleAccounts }} />;
+  if (page === 'sources') content = <Sources {...{ config, setConfig, chooseDirectory, googleAccount, notify, openFolder, onRestore: openRestoreDialog, dirty, saving, onSave: save }} />;
+  if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, verifyStorage, verifyingProfile, startGoogleAuth, testingProfile, notify, googleAccounts, dirty, saving, onSave: save }} />;
   if (page === 'restore') content = <Restore {...{ config, onRestore: openRestoreDialog, openFolder }} />;
   if (page === 'logs') content = <Logs {...{ logs, refreshLogs, operationLogs }} />;
-  if (page === 'settings') content = <Settings {...{ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard: () => setShowWizard(true), updateState, checkForUpdates, installUpdate, openFolder }} />;
+  if (page === 'settings') content = <Settings {...{ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard: () => setShowWizard(true), updateState, checkForUpdates, installUpdate, openFolder, dirty, saving, onSave: save }} />;
 
   return (
     <div className="app-shell">
@@ -2005,7 +2078,7 @@ export default function App() {
         <div className="sidebar-status"><span className={cx('status-pulse', schedulerState.enabled ? '' : 'paused')} /><div><strong>{schedulerState.enabled ? 'Schedules active' : 'Schedules paused'}</strong><span>{schedulerState.jobs.length} jobs · Version {systemInfo?.version || '1.1.0'}</span></div></div>
       </aside>
       <main>
-        <header className="topbar"><div><h1>{PAGES.find(([key]) => key === page)?.[1]}</h1><span className="config-path" title={configFile}>{configFile}</span></div><div className="topbar-actions"><button className="theme-toggle" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀' : '☾'}</button><Pill tone={operation?.status === 'running' ? 'info' : 'success'}>{operation?.status === 'running' ? 'Running' : 'Ready'}</Pill><Button variant={dirty ? 'primary' : 'secondary'} busy={saving} onClick={save}>{dirty ? 'Save changes' : 'Saved'}</Button></div></header>
+        <header className="topbar"><div><h1>{PAGES.find(([key]) => key === page)?.[1]}</h1><span className="config-path" title={configFile}>{configFile}</span></div><div className="topbar-actions"><button className="theme-toggle" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀' : '☾'}</button><Pill tone={operation?.status === 'running' ? 'info' : 'success'}>{operation?.status === 'running' ? 'Running' : 'Ready'}</Pill>{dirty && <Pill tone="warn">Unsaved changes</Pill>}</div></header>
         {(updateState.status === 'available' || updateState.status === 'downloading' || updateState.status === 'downloaded') && (
           <div className={cx('update-banner', updateState.status === 'downloaded' && 'ready')}>
             <span className="update-dot" />
