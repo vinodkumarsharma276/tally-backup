@@ -421,6 +421,22 @@ function dispatchScheduled(type, args = {}) {
   }
 }
 
+// Moves a cron expression earlier by `minutes`, for the pre-backup reminder.
+// Only literal minute/hour schedules can be shifted; step patterns like */6
+// return null so no misleading reminder is scheduled.
+function shiftCronEarlier(expression, minutes) {
+  const parts = String(expression).trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [minute, hour, dayOfMonth, month, weekday] = parts;
+  if (!/^\d{1,2}$/.test(minute) || !/^\d{1,2}$/.test(hour)) return null;
+
+  let total = Number(hour) * 60 + Number(minute) - minutes;
+  // A reminder that would fall on the previous day is dropped rather than
+  // firing at the wrong time on a day the backup may not run.
+  if (total < 0) return null;
+  return `${total % 60} ${Math.floor(total / 60)} ${dayOfMonth} ${month} ${weekday}`;
+}
+
 async function configureSchedules(config) {
   if (!config) config = await loadConfig();
   clearSchedules();
@@ -464,6 +480,26 @@ async function configureSchedules(config) {
       );
       task.start();
       schedulerJobs.push({ label: `Backup: ${source.name}`, expression, timezone, task });
+
+      const warnMinutes = Number(config.backup?.warnBeforeMinutes ?? 5);
+      const warnExpression = warnMinutes > 0 ? shiftCronEarlier(expression, warnMinutes) : null;
+      if (warnExpression && cron.validate(warnExpression)) {
+        const warnTask = cron.createTask(
+          warnExpression,
+          () => {
+            showNotification(
+              'Backup starts soon',
+              `"${source.name}" backs up in ${warnMinutes} minutes. Please save and close your files.`,
+              'idle'
+            );
+            emit('backup:warning', { sourceName: source.name, minutes: warnMinutes });
+            appendDesktopLog(`Pre-backup reminder sent for '${source.name}' (${warnMinutes} min).`);
+          },
+          { timezone }
+        );
+        warnTask.start();
+        schedulerJobs.push({ label: `Reminder: ${source.name}`, expression: warnExpression, timezone, task: warnTask });
+      }
     }
   }
 

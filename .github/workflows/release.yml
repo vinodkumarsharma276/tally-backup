@@ -125,9 +125,11 @@ jobs:
           if [ -n "${GOOGLE_OAUTH_CLIENT}" ]; then
             printf '%s' "${GOOGLE_OAUTH_CLIENT}" > config/google-oauth-client.json
             if node -e "if(!require('./config/google-oauth-client.json').installed.client_id) process.exit(1)"; then
-              echo "OAuth client injected."
+              # The client id is public (it appears in every auth URL); logging it
+              # lets us confirm which client a build shipped with.
+              node -e "console.log('OAuth client id:', require('./config/google-oauth-client.json').installed.client_id)"
             else
-              echo "::error::GOOGLE_OAUTH_CLIENT is not valid JSON with installed.client_id."
+              echo "::error::GOOGLE_OAUTH_CLIENT must be JSON with installed.client_id (a Desktop app client)."
               exit 1
             fi
           else

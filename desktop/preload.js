@@ -42,5 +42,6 @@ contextBridge.exposeInMainWorld('tallyDesktop', {
   onSchedulerState: (callback) => subscribe('scheduler:state', callback),
   onAuthState: (callback) => subscribe('auth:state', callback),
   onRepoConflict: (callback) => subscribe('repo:conflict', callback),
+  onBackupWarning: (callback) => subscribe('backup:warning', callback),
   onUpdateState: (callback) => subscribe('update:state', callback),
 });

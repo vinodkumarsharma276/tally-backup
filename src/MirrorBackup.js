@@ -88,38 +88,47 @@ class MirrorBackup {
     const stats = { fileCount: 0, copiedFiles: 0, skippedFiles: 0, copiedBytes: 0, totalBytes: 0, deletedFiles: 0 };
     const keep = new Set();
 
+    // Scan everything first: progress is meaningless until the total is known.
+    const planned = [];
     for (const { root, namespace } of roots) {
       if (!(await fs.pathExists(root))) throw new Error(`Folder to copy was not found: ${root}`);
-      const files = await this._walk(root);
-      for (const rel of files) {
+      for (const rel of await this._walk(root)) {
         const sourcePath = path.join(root, rel);
-        const relKey = namespace ? path.join(namespace, rel) : rel;
-        const destPath = path.join(destRoot, relKey);
-        keep.add(path.resolve(destPath));
-
         const size = (await fs.stat(sourcePath)).size;
+        planned.push({ sourcePath, relKey: namespace ? path.join(namespace, rel) : rel, size });
         stats.fileCount += 1;
         stats.totalBytes += size;
+      }
+    }
+    if (this.logger && this.logger.info) {
+      this.logger.info(`Copy: ${stats.fileCount} file(s), ${(stats.totalBytes / 1048576).toFixed(2)} MB to check.`);
+    }
 
-        if (await MirrorBackup._needsCopy(sourcePath, destPath)) {
-          await fs.ensureDir(path.dirname(destPath));
-          await fs.copy(sourcePath, destPath, { preserveTimestamps: true, overwrite: true });
-          stats.copiedFiles += 1;
-          stats.copiedBytes += size;
-        } else {
-          stats.skippedFiles += 1;
-        }
+    let processedBytes = 0;
+    for (const { sourcePath, relKey, size } of planned) {
+      const destPath = path.join(destRoot, relKey);
+      keep.add(path.resolve(destPath));
 
-        if (onProgress) {
-          onProgress({
-            phase: 'mirror',
-            filesDone: stats.copiedFiles + stats.skippedFiles,
-            fileCount: stats.fileCount,
-            processedBytes: stats.copiedBytes,
-            totalBytes: stats.totalBytes,
-            elapsedMs: Date.now() - started,
-          });
-        }
+      if (await MirrorBackup._needsCopy(sourcePath, destPath)) {
+        await fs.ensureDir(path.dirname(destPath));
+        await fs.copy(sourcePath, destPath, { preserveTimestamps: true, overwrite: true });
+        stats.copiedFiles += 1;
+        stats.copiedBytes += size;
+      } else {
+        stats.skippedFiles += 1;
+      }
+
+      // Skipped files still count as progress: they are work completed.
+      processedBytes += size;
+      if (onProgress) {
+        onProgress({
+          phase: 'mirror',
+          filesDone: stats.copiedFiles + stats.skippedFiles,
+          fileCount: stats.fileCount,
+          processedBytes,
+          totalBytes: stats.totalBytes,
+          elapsedMs: Date.now() - started,
+        });
       }
     }
 

@@ -22,6 +22,11 @@
       "type": "local",
       "rootDir": "C:\\Users\\vinodsharma\\personal_workspace\\tally-backup\\SecondaryBackup",
       "secretId": "Tally_Local_Storage"
+    },
+    "primary": {
+      "type": "google_drive",
+      "secretId": "primary",
+      "rootFolderName": "Backup Genie"
     }
   },
   "backup": {
@@ -68,10 +73,9 @@
             "label": ""
           }
         ],
-        "schedule": "32 22 * * *",
+        "schedule": "46 18 * * *",
         "schedules": [
-          "32 22 * * *",
-          "20 23 * * *"
+          "46 18 * * *"
         ]
       }
     ],
@@ -80,7 +84,8 @@
     "retryDelay": 5000,
     "compressionLevel": 6,
     "chunkSizeMB": 50,
-    "concurrency": 8
+    "concurrency": 8,
+    "timezone": "Asia/Calcutta"
   },
   "googleDrive": {
     "credentialsPath": "secret:config_test.google.oauth.credentials",
@@ -104,7 +109,7 @@
     "maxSize": "10m"
   },
   "email": {
-    "enabled": true,
+    "enabled": false,
     "mode": "smtp",
     "smtp": {
       "host": "smtp.gmail.com",

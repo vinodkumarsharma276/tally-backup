@@ -188,7 +188,9 @@ function Overview({ config, operation, progress, operationLogs, startBackup, sta
   const backups = enabled.filter((source) => source.operation === 'backup');
   const restores = enabled.filter((source) => source.operation === 'restore');
   const profileCount = Object.keys(config.storageProfiles || {}).length;
-  const retention = config.retention?.keepDailyBackups || 30;
+  // Retention varies per storage profile, so a single global figure would mislead.
+  const lastBackup = (runHistory || []).find((run) => run.type === 'backup' && run.status === 'success');
+  const lastRunLabel = lastBackup ? displayDate(lastBackup.completedAt).split(',')[0] : 'None yet';
 
   return (
     <div className="page-stack">
@@ -226,7 +228,7 @@ function Overview({ config, operation, progress, operationLogs, startBackup, sta
         <article className="metric-card"><span className="metric-icon green">↑</span><div><b>{backups.length}</b><span>Active backups</span></div></article>
         <article className="metric-card"><span className="metric-icon blue">↶</span><div><b>{restores.length}</b><span>Restore jobs</span></div></article>
         <article className="metric-card"><span className="metric-icon violet">◫</span><div><b>{profileCount}</b><span>Storage options</span></div></article>
-        <article className="metric-card"><span className="metric-icon amber">◷</span><div><b>{retention} days</b><span>Restore history</span></div></article>
+        <article className="metric-card"><span className="metric-icon amber">◷</span><div><b>{lastRunLabel}</b><span>Last backup</span></div></article>
       </section>
 
       <section className="card">
@@ -1008,7 +1010,7 @@ function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, 
       {schedulerState?.errors?.length > 0 && <div className="scheduler-errors">{schedulerState.errors.map((error) => <span key={error}>{error}</span>)}</div>}
       {schedulerState?.jobs?.length > 0 && <div className="schedule-list">{schedulerState.jobs.map((job) => <div key={`${job.label}-${job.expression}`}><strong>{job.label}</strong><span>{describeSchedule(job.expression)}</span><em>{job.timezone}</em></div>)}</div>}
     </section>
-    <section className="card"><div className="section-heading"><div><span className="eyebrow">Automation</span><h3>Defaults &amp; performance</h3></div></div><div className="form-grid three"><TimezoneField value={backup.timezone} onChange={(event) => updateBackup({ timezone: event.target.value })} hint="Schedules run in this time zone." /><Field type="number" min="1" max="32" label="Concurrent transfers" value={backup.concurrency || 8} onChange={(event) => updateBackup({ concurrency: Number(event.target.value) })} /><Field type="number" min="1" max="30" label="Default restore history (days)" value={retention.keepDailyBackups || 30} onChange={(event) => updateRetention({ keepDailyBackups: Math.min(30, Math.max(1, Number(event.target.value) || 1)) })} hint="Used by storage profiles that do not set their own." /></div><span className="field-hint">Each backup source has its own schedule, set on the Backup &amp; restore page.</span></section>
+    <section className="card"><div className="section-heading"><div><span className="eyebrow">Automation</span><h3>Defaults &amp; performance</h3></div></div><div className="form-grid three"><TimezoneField value={backup.timezone} onChange={(event) => updateBackup({ timezone: event.target.value })} hint="Schedules run in this time zone." /><Field type="number" min="1" max="32" label="Concurrent transfers" value={backup.concurrency || 8} onChange={(event) => updateBackup({ concurrency: Number(event.target.value) })} /><Field type="number" min="0" max="60" label="Warn me before a backup (minutes)" value={backup.warnBeforeMinutes ?? 5} onChange={(event) => updateBackup({ warnBeforeMinutes: Math.min(60, Math.max(0, Number(event.target.value) || 0)) })} hint="Reminds you to save and close files. 0 turns it off." /><Field type="number" min="1" max="30" label="Default restore history (days)" value={retention.keepDailyBackups || 30} onChange={(event) => updateRetention({ keepDailyBackups: Math.min(30, Math.max(1, Number(event.target.value) || 1)) })} hint="Used by storage profiles that do not set their own." /></div><span className="field-hint">Each backup source has its own schedule, set on the Backup &amp; restore page.</span></section>
     <section className="card"><div className="section-heading"><div><span className="eyebrow">Notifications</span><h3>Email reports</h3></div><label className="toggle"><input type="checkbox" checked={email.enabled === true} onChange={(event) => updateEmail({ enabled: event.target.checked })} /><span /></label></div><div className="form-grid three"><Field label="SMTP host" value={smtp.host || ''} onChange={(event) => updateSmtp({ host: event.target.value })} /><Field type="number" label="Port" value={smtp.port || 587} onChange={(event) => updateSmtp({ port: Number(event.target.value) })} /><Field label="Account" value={auth.user || ''} onChange={(event) => updateAuth({ user: event.target.value })} /><Field type="password" label="App password" value={auth.pass || ''} placeholder={config._secretStatus?.emailPassword ? 'Stored securely' : 'Enter app password'} onChange={(event) => updateAuth({ pass: event.target.value })} /><Field label="Send report to" value={email.to || ''} onChange={(event) => updateEmail({ to: event.target.value })} /><Field label="Subject" value={email.subject || ''} onChange={(event) => updateEmail({ subject: event.target.value })} /></div><div className={cx('credential-note', config._secretStatus?.emailPassword && 'credential-stored')}><span>{config._secretStatus?.emailPassword ? '✓' : '○'}</span>{config._secretStatus?.emailPassword ? 'SMTP password is stored in the operating system credential vault.' : 'The password will be moved to secure OS storage when saved.'}</div><div className="card-footer"><Button variant="secondary" busy={emailTesting} onClick={testEmail}>Send test email</Button></div></section>
     <section className="card"><div className="section-heading"><div><span className="eyebrow">Maintenance</span><h3>Updates</h3></div><Pill tone={updateState?.status === 'downloaded' ? 'success' : updateState?.status === 'error' ? 'warn' : 'neutral'}>{({ idle: 'Up to date', none: 'Up to date', checking: 'Checking…', available: 'Downloading', downloading: 'Downloading', downloaded: 'Ready to install', error: 'Check failed', unsupported: 'Installed app only' }[updateState?.status] || 'Up to date')}</Pill></div>
       <div className="preference-list">
@@ -1024,9 +1026,9 @@ function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, 
       <Field
         label="Service address"
         value={config.account?.controlPlaneUrl || ''}
-        placeholder="https://service.backupgenie.app"
+        placeholder="Not used — leave blank"
         onChange={(event) => setConfig((current) => ({ ...current, account: { ...current.account, controlPlaneUrl: event.target.value.trim() } }))}
-        hint="Needed only for signing in and syncing status. Backups run without it."
+        hint="Optional. Only needed if your organisation runs a Backup Genie account service for signing in across devices. Backups, restores and email reports all work without it."
       />
     </section>
     <section className="card">
@@ -1318,6 +1320,7 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [wizardError, setWizardError] = useState('');
   const lastStep = WIZARD_STEPS.length - 1;
   const chooseDirectory = (defaultPath) => api.chooseDirectory({ defaultPath });
   const setProvider = (updater) => setDraft((current) => ({ ...current, provider: typeof updater === 'function' ? updater(current.provider) : { ...current.provider, ...updater } }));
@@ -1361,13 +1364,32 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
     }
   };
   const runFirstBackup = async () => {
-    try { await persist(false); await api.startOperation({ type: 'backup' }); }
-    catch (error) { notify(error.message, 'error'); }
+    setWizardError('');
+    try {
+      await persist(false);
+      const missing = missingProfileFields(buildOnboardingConfig(baseConfig, draft, false).storageProfiles.primary || {});
+      if (missing.length) throw new Error(`Finish setting up your storage first (missing: ${missing.join(', ')}).`);
+      await api.startOperation({ type: 'backup' });
+    } catch (error) {
+      setWizardError(error.message);
+      notify(error.message, 'error');
+    }
   };
   const finish = async () => {
     setSaving(true);
+    setWizardError('');
     try { await persist(true); onFinish(); }
-    catch (error) { notify(error.message, 'error'); setSaving(false); }
+    catch (error) { setWizardError(error.message); notify(error.message, 'error'); setSaving(false); }
+  };
+  // Setup is optional: everything here can be configured later in Settings.
+  const skipSetup = async () => {
+    setSaving(true);
+    setWizardError('');
+    try {
+      const result = await api.saveConfig({ ...baseConfig, onboarding: { completed: true, version: 1 } });
+      onSavedConfig(result.config);
+      onFinish();
+    } catch (error) { setWizardError(error.message); setSaving(false); }
   };
 
   const renderStep = () => {
@@ -1553,8 +1575,17 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
         </aside>
         <div className="wizard-main">
           <div className="wizard-body">{renderStep()}</div>
+          {wizardError && (
+            <div className="wizard-error">
+              <strong>Could not save your settings.</strong>
+              <span>{wizardError}</span>
+            </div>
+          )}
           <div className="wizard-footer">
-            <div>{step > 0 && <Button variant="ghost" onClick={() => goToStep(step - 1)}>Back</Button>}</div>
+            <div>
+              {step > 0 && <Button variant="ghost" onClick={() => goToStep(step - 1)}>Back</Button>}
+              <Button variant="ghost" busy={saving} onClick={skipSetup}>Skip setup</Button>
+            </div>
             <div className="wizard-footer-right">
               {canSkip(step) && <Button variant="secondary" onClick={() => goToStep(step + 1)}>Skip</Button>}
               {step < lastStep
@@ -1595,6 +1626,7 @@ export default function App() {
   const [offlineMode, setOfflineMode] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [repoConflict, setRepoConflict] = useState(null);
+  const [backupWarning, setBackupWarning] = useState(null);
   const [acceptingRepo, setAcceptingRepo] = useState(false);
 
   // Event subscriptions are registered once, so they must not close over the
@@ -1665,7 +1697,8 @@ export default function App() {
       refreshGoogleAccount(state.profileName || undefined);
     });
     const unsubRepo = api.onRepoConflict?.((payload) => setRepoConflict(payload));
-    return () => { unsubProgress(); unsubLog(); unsubState(); unsubScheduler(); unsubUpdate(); unsubAuth?.(); unsubRepo?.(); };
+    const unsubWarning = api.onBackupWarning?.((payload) => setBackupWarning(payload));
+    return () => { unsubProgress(); unsubLog(); unsubState(); unsubScheduler(); unsubUpdate(); unsubAuth?.(); unsubRepo?.(); unsubWarning?.(); };
   }, []);
 
   useEffect(() => {
@@ -1989,6 +2022,21 @@ export default function App() {
         <div className="content">{content}</div>
       </main>
       {toast && <div className={cx('toast', `toast-${toast.tone}`)}><span>{toast.tone === 'error' ? '!' : '✓'}</span>{toast.message}</div>}
+      {backupWarning && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <span className="eyebrow">Backup starting soon</span>
+            <h2>Please save and close your files</h2>
+            <p>
+              “{backupWarning.sourceName}” will be backed up in about {backupWarning.minutes} minutes.
+              Files that are open and unsaved may be copied in a half-written state, so save your work now.
+            </p>
+            <div className="modal-actions">
+              <Button onClick={() => setBackupWarning(null)}>I have saved my work</Button>
+            </div>
+          </div>
+        </div>
+      )}
       {restoreDialog && (
         <div className="modal-overlay">
           <div className="modal">
