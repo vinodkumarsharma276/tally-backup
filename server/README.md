@@ -29,6 +29,7 @@ Demo tenant (dev only): `tenantId = demo-tenant`, `licenseKey = DEMO-LICENSE-KEY
 | POST | `/v1/credentials` | Bearer | Vend prefix-scoped storage lease (`tenants/<id>/*`) |
 | GET | `/v1/usage` | Bearer | Current usage + quota |
 | POST | `/v1/usage/report` | Bearer | Desktop reports `bytesStored` + `bytesUploaded` after a run |
+| POST | `/v1/contact` | Origin allow-list | Website enquiry form → emails `CONTACT_INBOX` |
 | POST | `/v1/billing/webhook/:provider` | Signature | Subscription lifecycle (activate / renew / payment-failed / cancel) |
 
 Lease shape (all providers): `{ provider:'s3', bucket, region, endpoint, forcePathStyle, prefix,

@@ -14,8 +14,8 @@ class DevMailer {
     this.sent = [];
   }
 
-  async send({ to, subject, html }) {
-    const message = { from: this.config.mailer.from, to, subject, at: new Date().toISOString() };
+  async send({ to, subject, html, replyTo }) {
+    const message = { from: this.config.mailer.from, to, subject, replyTo, at: new Date().toISOString() };
     this.sent.push({ ...message, html });
     // eslint-disable-next-line no-console
     console.log(`[mailer:dev] would send "${subject}" from ${message.from} to ${to}`);
@@ -28,12 +28,12 @@ class ResendMailer {
     this.config = config;
   }
 
-  async send({ to, subject, html }) {
+  async send({ to, subject, html, replyTo }) {
     if (!this.config.mailer.apiKey) throw new Error('MAILER_API_KEY is required for the resend provider.');
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.config.mailer.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: this.config.mailer.from, to: [to], subject, html }),
+      body: JSON.stringify({ from: this.config.mailer.from, to: [to], subject, html, ...(replyTo ? { reply_to: replyTo } : {}) }),
     });
     if (!resp.ok) {
       const detail = await resp.text().catch(() => '');
@@ -49,7 +49,7 @@ class SendgridMailer {
     this.config = config;
   }
 
-  async send({ to, subject, html }) {
+  async send({ to, subject, html, replyTo }) {
     if (!this.config.mailer.apiKey) throw new Error('MAILER_API_KEY is required for the sendgrid provider.');
     // Parse "Name <email>" or a bare address for SendGrid's structured `from`.
     const match = /<([^>]+)>/.exec(this.config.mailer.from);
@@ -60,6 +60,7 @@ class SendgridMailer {
       body: JSON.stringify({
         personalizations: [{ to: [{ email: to }] }],
         from: { email: fromEmail },
+        ...(replyTo ? { reply_to: { email: replyTo } } : {}),
         subject,
         content: [{ type: 'text/html', value: html }],
       }),
@@ -92,8 +93,8 @@ class SmtpMailer {
     return this.transporter;
   }
 
-  async send({ to, subject, html }) {
-    const info = await this._transport().sendMail({ from: this.config.mailer.from, to, subject, html });
+  async send({ to, subject, html, replyTo }) {
+    const info = await this._transport().sendMail({ from: this.config.mailer.from, to, subject, html, replyTo });
     return { id: info.messageId, provider: 'smtp' };
   }
 

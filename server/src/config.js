@@ -92,6 +92,18 @@ function loadConfig(env = process.env) {
         pass: env.MAILER_SMTP_PASS || '',
       },
     },
+    // Public website enquiry form (site/ -> POST /v1/contact).
+    contact: {
+      // Where enquiries are delivered. Empty disables the endpoint.
+      inbox: env.CONTACT_INBOX || '',
+      // Exact browser origins allowed to POST the form (CORS allow-list).
+      allowedOrigins: String(env.CONTACT_ALLOWED_ORIGINS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+      // Simple abuse brake: max submissions per IP per hour.
+      maxPerHour: int(env.CONTACT_MAX_PER_HOUR, 5),
+    },
     graceRetentionDays: int(env.GRACE_RETENTION_DAYS, 15),
   };
 }

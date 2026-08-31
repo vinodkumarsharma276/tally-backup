@@ -10,6 +10,33 @@ function clientIp(req) {
   return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
 }
 
+// Enquiry text is user-controlled and ends up inside an HTML email.
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Fixed-window, per-IP counter. Good enough to blunt form spam on one node. */
+function createRateLimiter(maxPerHour) {
+  const hits = new Map();
+  return function allow(key) {
+    const now = Date.now();
+    const windowStart = now - 60 * 60 * 1000;
+    const recent = (hits.get(key) || []).filter((t) => t > windowStart);
+    if (recent.length >= maxPerHour) return false;
+    recent.push(now);
+    hits.set(key, recent);
+    if (hits.size > 5000) {
+      for (const [k, list] of hits) if (!list.some((t) => t > windowStart)) hits.delete(k);
+    }
+    return true;
+  };
+}
+
 /**
  * Builds the Express app. Dependencies (config, store, vending provider,
  * billing provider, audit log) are injected so tests can supply a MemoryStore +
@@ -192,9 +219,85 @@ function createApp({ config, store, vendingProvider, billingProvider, audit = ne
     }
   });
 
-  // The desktop app reports metering after a run: absolute bytesStored + delta uploaded.
-  app.post('/v1/usage/report', auth, async (req, res, next) => {
+  // Public enquiry form on the marketing site. No auth (anonymous visitors),
+  // so it is protected by an origin allow-list, a honeypot and a rate limit.
+  const contactAllowed = createRateLimiter(config.contact?.maxPerHour ?? 5);
+  const originAllowed = (origin) => !!origin && (config.contact?.allowedOrigins || []).includes(origin);
+
+  app.options('/v1/contact', (req, res) => {
+    const origin = req.headers.origin;
+    if (!originAllowed(origin)) return res.status(403).end();
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Vary', 'Origin');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Max-Age', '86400');
+    res.status(204).end();
+  });
+
+  app.post('/v1/contact', async (req, res, next) => {
     try {
+      const origin = req.headers.origin;
+      if (origin) {
+        if (!originAllowed(origin)) return res.status(403).json({ error: 'origin not allowed' });
+        res.set('Access-Control-Allow-Origin', origin);
+        res.set('Vary', 'Origin');
+      }
+      const inbox = config.contact?.inbox;
+      if (!mailer || !inbox) return res.status(503).json({ error: 'the enquiry form is not configured yet' });
+
+      const body = req.body || {};
+      // Honeypot: a real browser never fills the hidden field. Answer 200 so
+      // bots get no signal about why it failed.
+      if (body.website) return res.json({ ok: true });
+
+      const oneLine = (value, max) => String(value || '').replace(/[\r\n]+/g, ' ').trim().slice(0, max);
+      const name = oneLine(body.name, 120);
+      const email = String(body.email || '').trim();
+      const message = String(body.message || '').trim();
+      if (!name) return res.status(400).json({ error: 'a name is required' });
+      if (!EMAIL_RE.test(email) || email.length > 200) return res.status(400).json({ error: 'a valid email is required' });
+      if (message.length < 10 || message.length > 4000) return res.status(400).json({ error: 'please write a short message (10-4000 characters)' });
+
+      const ip = clientIp(req);
+      if (!contactAllowed(ip || 'unknown')) return res.status(429).json({ error: 'too many enquiries from this address, please email us directly' });
+
+      const fields = {
+        Name: name,
+        Email: email,
+        Business: oneLine(body.company, 160),
+        Phone: oneLine(body.phone, 40),
+        Topic: oneLine(body.topic, 80) || 'General',
+        Product: oneLine(body.product, 80),
+        Source: oneLine(body.source, 80) || 'website',
+        IP: ip,
+      };
+      const rows = Object.entries(fields)
+        .filter(([, value]) => value)
+        .map(([label, value]) => `<tr><td style="padding:4px 12px 4px 0;color:#667;">${escapeHtml(label)}</td><td style="padding:4px 0;"><b>${escapeHtml(value)}</b></td></tr>`)
+        .join('');
+      const html =
+        `<div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.6">` +
+        `<h2 style="margin:0 0 12px">New website enquiry</h2>` +
+        `<table style="border-collapse:collapse;margin-bottom:16px">${rows}</table>` +
+        `<div style="white-space:pre-wrap;border-left:3px solid #2bbc7f;padding-left:12px">${escapeHtml(message)}</div>` +
+        `</div>`;
+
+      const result = await mailer.send({
+        to: inbox,
+        subject: `Website enquiry — ${fields.Topic} — ${name}`,
+        html,
+        replyTo: email,
+      });
+      audit.record('contact.submit', { topic: fields.Topic, email, provider: result.provider, ip });
+      res.json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The desktop app reports metering after a run: absolute bytesStored + delta uploaded.
+  app.post('/v1/usage/report', auth, async (req, res, next) => {    try {
       const { bytesStored, bytesUploaded } = req.body || {};
       const usage = await store.setUsage(req.tenantId, {
         bytesStored: typeof bytesStored === 'number' ? bytesStored : undefined,
