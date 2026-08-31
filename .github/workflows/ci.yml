@@ -10,20 +10,55 @@ on:
     branches: [main]
 
 jobs:
+  # Backup/restore engine. Needs the full dependency tree (keytar, electron
+  # tooling), so it is the slow job — kept separate from the control plane.
   test:
+    runs-on: ubuntu-latest
+    env:
+      # The tests never launch Electron, so skip the ~100 MB binary download.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      # keytar (OS credential vault) needs libsecret to build on Linux.
+      - name: Install libsecret
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit --no-fund
+      - name: Run engine tests
+        run: npm test
+
+  # The control plane only needs express/jsonwebtoken/nodemailer, so it must not
+  # wait on the desktop app's native dependencies.
+  server:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      # keytar (OS credential vault) needs libsecret to build on Linux.
-      - name: Install libsecret
-        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
+          node-version: 24
+          cache: npm
+          cache-dependency-path: server/package-lock.json
       - name: Install dependencies
-        run: npm ci
-      - name: Run engine tests
-        run: npm test
+        working-directory: server
+        run: npm ci --prefer-offline --no-audit --no-fund
       - name: Run control plane tests
         working-directory: server
-        run: npm ci && npm test
+        run: npm test
+
+  # Catches a broken marketing site in review rather than at deploy time.
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install build tooling
+        run: npm install --no-save --no-audit --no-fund vite@^8.1.3 @vitejs/plugin-react@^6.0.3 react@^19.2.7 react-dom@^19.2.7
+      - name: Build site
+        run: npx vite build --config vite.site.config.js
