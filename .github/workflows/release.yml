@@ -49,10 +49,11 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          # main is protected, and the built-in token cannot bypass it. Add a
-          # RELEASE_TOKEN secret (a PAT with Contents: write) so the version
-          # bump can be pushed; without it, releases must be tagged by hand.
-          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # `main` allows no direct pushes and has no human bypass. The ruleset
+          # grants bypass to deploy keys only, so the version bump is pushed over
+          # SSH using the RELEASE_SSH_KEY secret (private half of the repo's
+          # write-enabled deploy key). Without it, releases must be tagged by hand.
+          ssh-key: ${{ secrets.RELEASE_SSH_KEY }}
 
       - name: Resolve version and create tag
         id: resolve

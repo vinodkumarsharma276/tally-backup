@@ -7,15 +7,30 @@ single GitHub Release.
 
 ## Cut a release
 
-```powershell
-# 1. Bump the version in package.json (must be higher than the last release)
-#    e.g. 0.1.1 -> 0.1.2
-# 2. Commit the bump
-git add package.json
-git commit -m "release: 0.1.2"
+`main` accepts no direct pushes, so the version bump goes through a pull request.
 
-# 3. Push main, then push a matching tag (this triggers the build)
-git push origin main
+### Option A — Actions (recommended)
+
+**Actions → Release → Run workflow**, enter the version (e.g. `0.1.2`). CI runs the
+test suites, bumps `package.json`, pushes the commit to `main` over SSH using the
+`RELEASE_SSH_KEY` deploy key, tags it and builds the installers.
+
+### Option B — by hand
+
+```powershell
+# 1. Bump the version on a branch (must be higher than the last release)
+git switch -c release/0.1.2
+npm version 0.1.2 --no-git-tag-version
+git add package.json package-lock.json
+git commit -m "release: 0.1.2"
+git push -u origin HEAD
+
+# 2. Merge it (CI must pass)
+gh pr create --fill
+gh pr merge --squash --delete-branch --auto
+
+# 3. Tag the merged commit to trigger the build
+git switch main; git pull
 git tag v0.1.2
 git push origin v0.1.2
 ```
@@ -40,8 +55,14 @@ appears under **Releases** with:
   SmartScreen warning: **More info → Run anyway** (until a code-signing cert is added).
 - **Linux** → run the `.AppImage` (mark executable), or `sudo apt install ./Backup-Genie-<version>.deb`.
 
-## Optional repo secrets (Settings → Secrets and variables → Actions)
+## Repo secrets (Settings → Secrets and variables → Actions)
 
+- `RELEASE_SSH_KEY` — **required for Option A.** Private half of the repo's
+  write-enabled deploy key ("Release automation"). `main` grants ruleset bypass to
+  deploy keys only, so this is what lets the workflow push the version bump. No
+  human, including an admin, can push to `main`. To rotate: delete the deploy key
+  under Settings → Deploy keys, generate a new `ed25519` pair, add the public half
+  with write access, and replace this secret with the private half.
 - `GOOGLE_OAUTH_CLIENT` — contents of `config/google-oauth-client.json`, so shipped
   builds can "Connect Google" (the file is git-ignored, so CI injects it).
 - `CSC_LINK` + `CSC_KEY_PASSWORD` — Windows code-signing certificate, to remove the
