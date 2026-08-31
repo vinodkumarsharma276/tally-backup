@@ -9,6 +9,7 @@ const { createBillingProvider } = require('./billing');
 const { createUsageLister, ReconciliationService } = require('./reconciliation');
 const { createAuditLog } = require('./audit');
 const { createMailer } = require('./mailer');
+const { createEnquiryStore } = require('./contact');
 const { createApp } = require('./app');
 const { seedDemo } = require('./seed');
 
@@ -22,13 +23,15 @@ async function main() {
   const billingProvider = createBillingProvider(config);
   const audit = createAuditLog(config);
   const mailer = createMailer(config);
-  const app = createApp({ config, store, vendingProvider, billingProvider, audit, mailer });
+  const enquiryStore = createEnquiryStore(config);
+  const app = createApp({ config, store, vendingProvider, billingProvider, audit, mailer, enquiryStore });
 
   const server = app.listen(config.port, () => {
     // eslint-disable-next-line no-console
     console.log(
       `[control-plane] listening on :${config.port} ` +
-      `(store=${config.store}, vending=${config.vendingProvider}, billing=${config.billing.provider}, env=${config.nodeEnv})`
+      `(store=${config.store}, vending=${config.vendingProvider}, billing=${config.billing.provider}, ` +
+      `enquiries=${enquiryStore ? enquiryStore.name : 'none'}, env=${config.nodeEnv})`
     );
   });
 
