@@ -103,6 +103,16 @@ function loadConfig(env = process.env) {
         .filter(Boolean),
       // Simple abuse brake: max submissions per IP per hour.
       maxPerHour: int(env.CONTACT_MAX_PER_HOUR, 5),
+      // Durable record of every enquiry, written before the email is sent.
+      store: env.CONTACT_STORE || 'none', // none | memory | file | firestore
+      filePath: env.CONTACT_FILE || './data/enquiries.jsonl',
+      firestore: {
+        projectId: env.FIRESTORE_PROJECT_ID || env.GOOGLE_CLOUD_PROJECT || '',
+        collection: env.CONTACT_FIRESTORE_COLLECTION || 'enquiries',
+        databaseId: env.FIRESTORE_DATABASE_ID || '',
+        // Inline service-account JSON for hosts without a writable filesystem.
+        credentialsJson: env.FIRESTORE_CREDENTIALS_JSON || '',
+      },
     },
     graceRetentionDays: int(env.GRACE_RETENTION_DAYS, 15),
   };

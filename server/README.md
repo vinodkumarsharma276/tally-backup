@@ -29,7 +29,7 @@ Demo tenant (dev only): `tenantId = demo-tenant`, `licenseKey = DEMO-LICENSE-KEY
 | POST | `/v1/credentials` | Bearer | Vend prefix-scoped storage lease (`tenants/<id>/*`) |
 | GET | `/v1/usage` | Bearer | Current usage + quota |
 | POST | `/v1/usage/report` | Bearer | Desktop reports `bytesStored` + `bytesUploaded` after a run |
-| POST | `/v1/contact` | Origin allow-list | Website enquiry form → emails `CONTACT_INBOX` |
+| POST | `/v1/contact` | Origin allow-list | Website enquiry form → persisted to `CONTACT_STORE`, then emailed to `CONTACT_INBOX` |
 | POST | `/v1/billing/webhook/:provider` | Signature | Subscription lifecycle (activate / renew / payment-failed / cancel) |
 
 Lease shape (all providers): `{ provider:'s3', bucket, region, endpoint, forcePathStyle, prefix,
@@ -43,6 +43,9 @@ credentials:{ accessKeyId, secretAccessKey, sessionToken?, expiration }, expires
   from the company address (`src/mailer/`). Use `smtp` to point at any vendor (Brevo, Zoho ZeptoMail,
   Amazon SES, Mailjet…) with config only — no code change. `MAILER_ADMIN_BCC` optionally copies every
   report to your ops address.
+- `CONTACT_STORE` = `none` (default) | `memory` | `file` | `firestore` — durable record of every website
+  enquiry (`src/contact/`), written **before** the notification email so a mail outage cannot lose a lead.
+  Firestore auth uses `GOOGLE_APPLICATION_CREDENTIALS` or inline `FIRESTORE_CREDENTIALS_JSON`.
 - `MANAGED_BUCKET` / `MANAGED_REGION` / `MANAGED_ENDPOINT` — the managed S3-compatible bucket
   (Cloudflare R2 / Backblaze B2 recommended for cost).
 - `DEV_S3_*` — optional real static creds so the dev provider can drive a local MinIO / real S3

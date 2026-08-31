@@ -11,6 +11,7 @@ const { loadConfig } = require('../src/config');
 const { MemoryStore } = require('../src/store/MemoryStore');
 const { createVendingProvider } = require('../src/vending');
 const { DevMailer } = require('../src/mailer');
+const { createEnquiryStore, MemoryEnquiryStore, FileEnquiryStore, FirestoreEnquiryStore } = require('../src/contact');
 const { createApp } = require('../src/app');
 
 const ORIGIN = 'https://vinodkumarsharma276.github.io';
@@ -23,12 +24,14 @@ async function main() {
     CONTACT_INBOX: 'sales@backupgenie.app',
     CONTACT_ALLOWED_ORIGINS: `${ORIGIN},http://localhost:5173`,
     CONTACT_MAX_PER_HOUR: '2',
+    CONTACT_STORE: 'memory',
     NODE_ENV: 'test',
   });
   const store = new MemoryStore();
   await store.init();
   const mailer = new DevMailer(config);
-  const app = createApp({ config, store, vendingProvider: createVendingProvider(config), billingProvider: null, mailer });
+  const enquiryStore = createEnquiryStore(config);
+  const app = createApp({ config, store, vendingProvider: createVendingProvider(config), billingProvider: null, mailer, enquiryStore });
   const server = await new Promise((resolve) => {
     const s = app.listen(0, () => resolve(s));
   });
@@ -57,10 +60,16 @@ async function main() {
 
   try {
     const ok = await post(valid);
+    const okBody = await ok.json();
     check('accepts a valid enquiry', ok.status === 200);
     check('emails the configured inbox', mailer.sent.length === 1 && mailer.sent[0].to === 'sales@backupgenie.app');
     check('replies go to the enquirer', mailer.sent[0].replyTo === 'asha@example.com');
     check('cors header echoes the allowed origin', ok.headers.get('access-control-allow-origin') === ORIGIN);
+
+    const saved = await enquiryStore.list();
+    check('enquiry persisted', saved.length === 1 && saved[0].email === 'asha@example.com' && saved[0].message === valid.message);
+    check('persisted record carries context', !!saved[0].receivedAt && saved[0].topic === 'Early access' && saved[0].source === 'website');
+    check('response returns the stored id', okBody.id === saved[0].id);
 
     const foreign = await post(valid, { Origin: 'https://evil.example.com' });
     check('rejects a foreign origin (403)', foreign.status === 403);
@@ -97,6 +106,49 @@ async function main() {
     });
     offServer.close();
     check('unconfigured form reports 503', offResp.status === 503);
+
+    // A mail outage must not lose the lead: persisted enquiries still succeed.
+    const brokenMailer = { send: async () => { throw new Error('smtp down'); } };
+    const outageStore = new MemoryEnquiryStore();
+    const outageApp = createApp({ config, store, vendingProvider: createVendingProvider(config), billingProvider: null, mailer: brokenMailer, enquiryStore: outageStore });
+    const outageServer = await new Promise((resolve) => {
+      const s = outageApp.listen(0, () => resolve(s));
+    });
+    const outageResp = await fetch(`http://127.0.0.1:${outageServer.address().port}/v1/contact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(valid),
+    });
+    outageServer.close();
+    check('email outage still succeeds when persisted', outageResp.status === 200 && outageStore.saved.length === 1);
+
+    // Storage outage with no mailbox configured must surface an error, not a
+    // cheerful 200 that quietly drops the enquiry.
+    const brokenStore = { name: 'broken', save: async () => { throw new Error('firestore unavailable'); } };
+    const noMailConfig = loadConfig({ STORE: 'memory', CONTACT_STORE: 'memory', CONTACT_ALLOWED_ORIGINS: ORIGIN, NODE_ENV: 'test' });
+    const brokenApp = createApp({ config: noMailConfig, store, vendingProvider: createVendingProvider(noMailConfig), billingProvider: null, mailer: null, enquiryStore: brokenStore });
+    const brokenServer = await new Promise((resolve) => {
+      const s = brokenApp.listen(0, () => resolve(s));
+    });
+    const brokenResp = await fetch(`http://127.0.0.1:${brokenServer.address().port}/v1/contact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(valid),
+    });
+    brokenServer.close();
+    check('storage outage surfaces an error (500)', brokenResp.status === 500);
+
+    // Store selection is config-only.
+    check('store factory: none', createEnquiryStore(loadConfig({})) === null);
+    check('store factory: file', createEnquiryStore(loadConfig({ CONTACT_STORE: 'file' })) instanceof FileEnquiryStore);
+    check('store factory: firestore', createEnquiryStore(loadConfig({ CONTACT_STORE: 'firestore' })) instanceof FirestoreEnquiryStore);
+    const fsStore = createEnquiryStore(loadConfig({ CONTACT_STORE: 'firestore', CONTACT_FIRESTORE_COLLECTION: 'leads' }));
+    check('firestore collection from config', fsStore.collection === 'leads');
+    let credErr = null;
+    try {
+      createEnquiryStore(loadConfig({ CONTACT_STORE: 'firestore', FIRESTORE_CREDENTIALS_JSON: 'not-json' }))._client();
+    } catch (e) { credErr = e; }
+    check('firestore reports bad credentials clearly', credErr && /FIRESTORE_CREDENTIALS_JSON|@google-cloud\/firestore/.test(credErr.message));
   } finally {
     server.close();
     await store.close();

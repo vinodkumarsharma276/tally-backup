@@ -42,7 +42,7 @@ function createRateLimiter(maxPerHour) {
  * billing provider, audit log) are injected so tests can supply a MemoryStore +
  * dev providers with no external services.
  */
-function createApp({ config, store, vendingProvider, billingProvider, audit = new NullAuditLog(), mailer = null, verifyIdToken = verifyGoogleIdToken }) {
+function createApp({ config, store, vendingProvider, billingProvider, audit = new NullAuditLog(), mailer = null, enquiryStore = null, verifyIdToken = verifyGoogleIdToken }) {
   const app = express();
 
   app.get('/healthz', (req, res) => res.json({ ok: true, service: 've-tally-control-plane' }));
@@ -244,7 +244,8 @@ function createApp({ config, store, vendingProvider, billingProvider, audit = ne
         res.set('Vary', 'Origin');
       }
       const inbox = config.contact?.inbox;
-      if (!mailer || !inbox) return res.status(503).json({ error: 'the enquiry form is not configured yet' });
+      const canEmail = !!(mailer && inbox);
+      if (!canEmail && !enquiryStore) return res.status(503).json({ error: 'the enquiry form is not configured yet' });
 
       const body = req.body || {};
       // Honeypot: a real browser never fills the hidden field. Answer 200 so
@@ -283,21 +284,66 @@ function createApp({ config, store, vendingProvider, billingProvider, audit = ne
         `<div style="white-space:pre-wrap;border-left:3px solid #2bbc7f;padding-left:12px">${escapeHtml(message)}</div>` +
         `</div>`;
 
-      const result = await mailer.send({
-        to: inbox,
-        subject: `Website enquiry — ${fields.Topic} — ${name}`,
-        html,
-        replyTo: email,
+      // Persist first, notify second: a mail outage must never lose a lead.
+      let stored = null;
+      let storeError = null;
+      if (enquiryStore) {
+        try {
+          stored = await enquiryStore.save({
+            name,
+            email,
+            company: fields.Business,
+            phone: fields.Phone,
+            topic: fields.Topic,
+            product: fields.Product,
+            source: fields.Source,
+            message,
+            ip,
+            userAgent: String(req.headers['user-agent'] || '').slice(0, 400),
+            receivedAt: new Date().toISOString(),
+            emailed: false,
+          });
+        } catch (error) {
+          storeError = error;
+          audit.record('contact.store_failed', { store: enquiryStore.name, reason: error.message, ip });
+          if (!canEmail) return next(error);
+        }
+      }
+
+      let emailProvider = null;
+      if (canEmail) {
+        try {
+          const result = await mailer.send({
+            to: inbox,
+            subject: `Website enquiry — ${fields.Topic} — ${name}`,
+            html,
+            replyTo: email,
+          });
+          emailProvider = result.provider;
+        } catch (error) {
+          audit.record('contact.email_failed', { reason: error.message, stored: !!stored, ip });
+          // Only fail the visitor's request if nothing was persisted either.
+          if (!stored) return next(error);
+        }
+      }
+
+      audit.record('contact.submit', {
+        id: stored?.id,
+        topic: fields.Topic,
+        email,
+        stored: stored ? enquiryStore.name : (storeError ? 'failed' : 'none'),
+        provider: emailProvider,
+        ip,
       });
-      audit.record('contact.submit', { topic: fields.Topic, email, provider: result.provider, ip });
-      res.json({ ok: true });
+      res.json({ ok: true, id: stored?.id });
     } catch (error) {
       next(error);
     }
   });
 
   // The desktop app reports metering after a run: absolute bytesStored + delta uploaded.
-  app.post('/v1/usage/report', auth, async (req, res, next) => {    try {
+  app.post('/v1/usage/report', auth, async (req, res, next) => {
+    try {
       const { bytesStored, bytesUploaded } = req.body || {};
       const usage = await store.setUsage(req.tenantId, {
         bytesStored: typeof bytesStored === 'number' ? bytesStored : undefined,
