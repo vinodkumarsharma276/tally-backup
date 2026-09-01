@@ -10,6 +10,7 @@ const {
   Menu,
   Notification,
   nativeImage,
+  powerMonitor,
 } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
@@ -54,6 +55,8 @@ let runtimeSettings = {
 let isQuitting = false;
 let trayResetTimer = null;
 let closeHintShown = false;
+// Missed runs found at startup/resume, dispatched one at a time.
+let pendingCatchUps = [];
 
 const START_HIDDEN = process.argv.includes('--hidden');
 // Schedules follow this machine unless the config names a zone.
@@ -421,6 +424,115 @@ function dispatchScheduled(type, args = {}) {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Missed-run recovery
+ *
+ * node-cron timers only exist while this process runs, and the OS
+ * suspends them during sleep/hibernate. Without the state below, a
+ * schedule that came due while the machine was off is skipped silently
+ * and forever. We persist each job's next due time so the next launch
+ * (or wake) can notice the gap and catch up.
+ * ------------------------------------------------------------------ */
+
+function scheduleStatePath() {
+  return path.join(configPathManager.dataDir, 'schedule-state.json');
+}
+
+async function readScheduleState() {
+  const state = await fs.readJson(scheduleStatePath()).catch(() => ({}));
+  return state && typeof state === 'object' ? state : {};
+}
+
+async function writeScheduleState(state) {
+  try {
+    await fs.ensureDir(path.dirname(scheduleStatePath()));
+    await fs.writeJson(scheduleStatePath(), state, { spaces: 2 });
+  } catch (error) {
+    appendDesktopLog(`Could not save schedule state: ${error.message}`);
+  }
+}
+
+async function recordScheduleFired(key) {
+  const state = await readScheduleState();
+  const job = schedulerJobs.find((entry) => entry.key === key);
+  const next = job?.task?.getNextRun?.();
+  state[key] = {
+    ...(state[key] || {}),
+    lastFiredAt: new Date().toISOString(),
+    dueAt: next ? new Date(next).toISOString() : null,
+  };
+  await writeScheduleState(state);
+}
+
+// Runs one catch-up at a time so several missed sources cannot all start at once.
+function queueCatchUps(jobs) {
+  pendingCatchUps.push(...jobs);
+  if (!currentOperation) dispatchNextCatchUp();
+}
+
+function dispatchNextCatchUp() {
+  const job = pendingCatchUps.shift();
+  if (!job) return;
+  appendDesktopLog(`Catching up missed ${job.type} for '${job.sourceName}' (was due ${job.dueAt}).`);
+  showNotification(
+    'Catching up a missed backup',
+    `"${job.sourceName}" was due ${job.dueAt} while this machine was off or asleep.`,
+    'idle'
+  );
+  dispatchScheduled(job.type, job.args);
+}
+
+async function runMissedSchedules(reason, config) {
+  if (runtimeSettings.schedulerEnabled === false) return;
+  if (config?.backup?.catchUpMissed === false) {
+    await appendDesktopLog(`Missed-run check skipped (${reason}): catch-up disabled in config.`);
+    return;
+  }
+  const graceHours = Number(config?.backup?.catchUpWithinHours ?? 48);
+  const state = await readScheduleState();
+  const now = Date.now();
+  const missed = [];
+
+  for (const job of schedulerJobs) {
+    if (!job.catchUp) continue;
+    const due = state[job.key]?.dueAt ? Date.parse(state[job.key].dueAt) : NaN;
+    if (!Number.isFinite(due) || due > now) continue;
+    const lastFired = state[job.key]?.lastFiredAt ? Date.parse(state[job.key].lastFiredAt) : 0;
+    if (lastFired >= due) continue;
+    const hoursLate = (now - due) / 3_600_000;
+    if (graceHours > 0 && hoursLate > graceHours) {
+      await appendDesktopLog(
+        `Missed ${job.type} for '${job.sourceName}' (due ${state[job.key].dueAt}, ` +
+        `${Math.round(hoursLate)}h ago) is older than the ${graceHours}h catch-up window; waiting for the next schedule.`
+      );
+      continue;
+    }
+    missed.push({ ...job, dueAt: state[job.key].dueAt });
+  }
+
+  await appendDesktopLog(
+    `Missed-run check (${reason}): ${missed.length} of ${schedulerJobs.filter((j) => j.catchUp).length} job(s) overdue.`
+  );
+  if (missed.length) queueCatchUps(missed);
+}
+
+async function persistScheduleDueTimes() {
+  const state = await readScheduleState();
+  const live = {};
+  for (const job of schedulerJobs) {
+    if (!job.catchUp) continue;
+    const next = job.task?.getNextRun?.();
+    live[job.key] = {
+      ...(state[job.key] || {}),
+      label: job.label,
+      expression: job.expression,
+      timezone: job.timezone,
+      dueAt: next ? new Date(next).toISOString() : null,
+    };
+  }
+  await writeScheduleState(live);
+}
+
 // Moves a cron expression earlier by `minutes`, for the pre-backup reminder.
 // Only literal minute/hour schedules can be shifted; step patterns like */6
 // return null so no misleading reminder is scheduled.
@@ -437,7 +549,7 @@ function shiftCronEarlier(expression, minutes) {
   return `${total % 60} ${Math.floor(total / 60)} ${dayOfMonth} ${month} ${weekday}`;
 }
 
-async function configureSchedules(config) {
+async function configureSchedules(config, reason = 'config reload') {
   if (!config) config = await loadConfig();
   clearSchedules();
   await applyDesktopSettings(config);
@@ -473,13 +585,27 @@ async function configureSchedules(config) {
         errors.push(`Invalid schedule for ${source.name}: ${expression}`);
         continue;
       }
+      const key = `backup:${source.name}:${expression}`;
       const task = cron.createTask(
         expression,
-        () => dispatchScheduled('backup', { sourceName: source.name }),
+        () => {
+          recordScheduleFired(key);
+          dispatchScheduled('backup', { sourceName: source.name });
+        },
         { timezone }
       );
       task.start();
-      schedulerJobs.push({ label: `Backup: ${source.name}`, expression, timezone, task });
+      schedulerJobs.push({
+        key,
+        label: `Backup: ${source.name}`,
+        expression,
+        timezone,
+        task,
+        catchUp: true,
+        type: 'backup',
+        sourceName: source.name,
+        args: { sourceName: source.name },
+      });
 
       const warnMinutes = Number(config.backup?.warnBeforeMinutes ?? 5);
       const warnExpression = warnMinutes > 0 ? shiftCronEarlier(expression, warnMinutes) : null;
@@ -498,7 +624,7 @@ async function configureSchedules(config) {
           { timezone }
         );
         warnTask.start();
-        schedulerJobs.push({ label: `Reminder: ${source.name}`, expression: warnExpression, timezone, task: warnTask });
+        schedulerJobs.push({ key: `reminder:${source.name}:${warnExpression}`, label: `Reminder: ${source.name}`, expression: warnExpression, timezone, task: warnTask });
       }
     }
   }
@@ -514,17 +640,32 @@ async function configureSchedules(config) {
       errors.push(`Invalid restore schedule for ${source.name}: ${expression}`);
       continue;
     }
+    const restoreArgs = {
+      sourceName: source.name,
+      snapshotId: source.restore.snapshotId || 'latest',
+      destPath: source.sourcePath,
+    };
+    const key = `restore:${source.name}:${expression}`;
     const task = cron.createTask(
       expression,
-      () => dispatchScheduled('restore', {
-        sourceName: source.name,
-        snapshotId: source.restore.snapshotId || 'latest',
-        destPath: source.sourcePath,
-      }),
+      () => {
+        recordScheduleFired(key);
+        dispatchScheduled('restore', restoreArgs);
+      },
       { timezone }
     );
     task.start();
-    schedulerJobs.push({ label: `Restore: ${source.name}`, expression, timezone, task });
+    schedulerJobs.push({
+      key,
+      label: `Restore: ${source.name}`,
+      expression,
+      timezone,
+      task,
+      catchUp: true,
+      type: 'restore',
+      sourceName: source.name,
+      args: restoreArgs,
+    });
   }
 
   for (const error of errors) appendDesktopLog(error);
@@ -532,6 +673,10 @@ async function configureSchedules(config) {
   await appendDesktopLog(
     `Registered ${schedulerJobs.length} schedule(s)${errors.length ? ` with ${errors.length} error(s)` : ''}.`
   );
+  // Order matters: compare against the previously stored due times before
+  // overwriting them with the next occurrence.
+  await runMissedSchedules(reason, config);
+  await persistScheduleDueTimes();
   if (!currentOperation) setTrayState('idle', `${APP_NAME} — ${schedulerJobs.length} schedule(s) active`);
   return schedulerState;
 }
@@ -712,6 +857,7 @@ function startChildOperation(type, args = {}) {
     appendDesktopLog(`${description} ${code === 0 ? 'completed' : 'failed'} (origin=${completed.origin}, code=${code}, signal=${signal || 'none'})`);
     latestProgress = null;
     scheduleTrayReset();
+    if (pendingCatchUps.length) setTimeout(() => dispatchNextCatchUp(), 2000);
   });
 
   return { runId, type, pid: child.pid, startedAt };
@@ -1040,7 +1186,17 @@ if (gotSingleInstanceLock) {
     );
     registerIpc();
     await createWindow();
-    await configureSchedules();
+    await configureSchedules(undefined, 'startup');
+    // Sleep suspends cron timers and they do not fire retroactively, so the
+    // schedules are rebuilt and checked for misses on every wake.
+    powerMonitor.on('resume', () => {
+      appendDesktopLog('System resumed from sleep; re-arming schedules.');
+      configureSchedules(undefined, 'resume from sleep').catch((error) =>
+        appendDesktopLog(`Failed to re-arm schedules after resume: ${error.message}`)
+      );
+    });
+    powerMonitor.on('suspend', () => appendDesktopLog('System going to sleep; schedules paused until wake.'));
+    powerMonitor.on('shutdown', () => appendDesktopLog('System shutting down.'));
     if (app.isPackaged) {
       configureAutoUpdater();
       setTimeout(() => checkForUpdates(), 8000);
@@ -1061,6 +1217,7 @@ app.on('second-instance', () => showMainWindow());
 
 app.on('before-quit', () => {
   isQuitting = true;
+  appendDesktopLog('Desktop shutting down; scheduled jobs will not run until it is reopened.');
   clearSchedules();
   if (currentOperation) currentOperation.child.kill('SIGTERM');
 });
