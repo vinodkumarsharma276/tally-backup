@@ -1,0 +1,11 @@
+# Keep secrets, local state and test material out of the build context.
+node_modules
+npm-debug.log
+.env
+.env.*
+data
+test
+tools
+*.md
+Dockerfile
+.dockerignore

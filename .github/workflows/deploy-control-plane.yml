@@ -1,0 +1,67 @@
+name: Deploy control plane
+
+# Builds the control-plane container and rolls it out to Cloud Run.
+# Auth uses Workload Identity Federation, so no service-account JSON key is
+# ever stored in this repository.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/deploy-control-plane.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required to mint the OIDC token WIF exchanges for GCP creds
+
+concurrency:
+  group: control-plane-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # Tagging by commit SHA keeps every revision traceable to source, and
+      # makes a rollback a redeploy of a known-good tag rather than a rebuild.
+      - name: Build image
+        env:
+          IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/backup-genie/control-plane:${{ github.sha }}
+        run: gcloud builds submit server --tag "$IMAGE" --quiet
+
+      - name: Deploy revision
+        env:
+          IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/backup-genie/control-plane:${{ github.sha }}
+        run: |
+          gcloud run deploy control-plane \
+            --image "$IMAGE" \
+            --region "${{ vars.GCP_REGION }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --min-instances 0 \
+            --max-instances 4 \
+            --cpu 1 --memory 512Mi \
+            --concurrency 40 \
+            --timeout 60s \
+            --set-env-vars "NODE_ENV=production,STORE=memory,AUDIT_SINK=console,CONTACT_STORE=firestore,CONTACT_FIRESTORE_COLLECTION=enquiries,CONTACT_ALLOWED_ORIGINS=${{ vars.CONTACT_ALLOWED_ORIGINS }},CONTACT_INBOX=${{ vars.CONTACT_INBOX }},MAILER_PROVIDER=${{ vars.MAILER_PROVIDER }},MAILER_FROM=${{ vars.MAILER_FROM }}" \
+            --set-secrets "JWT_SECRET=jwt-secret:latest,VENDING_MASTER_SECRET=vending-master-secret:latest,BILLING_WEBHOOK_SECRET=billing-webhook-secret:latest,MAILER_API_KEY=mailer-api-key:latest" \
+            --quiet
+
+      - name: Smoke test
+        run: |
+          URL=$(gcloud run services describe control-plane --region "${{ vars.GCP_REGION }}" --format 'value(status.url)')
+          echo "Deployed to $URL"
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 "$URL/healthz"

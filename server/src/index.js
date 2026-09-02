@@ -53,15 +53,32 @@ async function main() {
     console.log(`[control-plane] reconciliation every ${config.reconciliation.intervalMinutes}m (${config.reconciliation.provider})`);
   }
 
-  const shutdown = async () => {
+  // Cloud Run (and most orchestrators) send SIGTERM, then SIGKILL ~10s later.
+  // Draining in-flight requests first avoids resetting a backup mid-vend.
+  const SHUTDOWN_GRACE_MS = Number(process.env.SHUTDOWN_GRACE_MS || 8000);
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[control-plane] ${signal} received, draining connections`);
     clearInterval(graceSweep);
     if (reconcileTimer) clearInterval(reconcileTimer);
-    server.close();
-    await store.close();
+    const forced = setTimeout(() => {
+      console.error('[control-plane] drain timed out, exiting');
+      process.exit(1);
+    }, SHUTDOWN_GRACE_MS);
+    forced.unref();
+    await new Promise((resolve) => server.close(resolve));
+    try {
+      await store.close();
+    } catch (error) {
+      console.error('[control-plane] store close failed:', error.message);
+    }
+    clearTimeout(forced);
     process.exit(0);
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   // A control plane must not disappear because of one bad request.
   process.on('unhandledRejection', (reason) => {
