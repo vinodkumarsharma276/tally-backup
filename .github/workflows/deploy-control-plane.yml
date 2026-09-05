@@ -57,8 +57,8 @@ jobs:
             --cpu 1 --memory 512Mi \
             --concurrency 40 \
             --timeout 60s \
-            --set-env-vars "NODE_ENV=production,STORE=memory,AUDIT_SINK=console,CONTACT_STORE=firestore,CONTACT_FIRESTORE_COLLECTION=enquiries,CONTACT_ALLOWED_ORIGINS=${{ vars.CONTACT_ALLOWED_ORIGINS }},CONTACT_INBOX=${{ vars.CONTACT_INBOX }},MAILER_PROVIDER=${{ vars.MAILER_PROVIDER }},MAILER_FROM=${{ vars.MAILER_FROM }}" \
-            --set-secrets "JWT_SECRET=jwt-secret:latest,VENDING_MASTER_SECRET=vending-master-secret:latest,BILLING_WEBHOOK_SECRET=billing-webhook-secret:latest,MAILER_API_KEY=mailer-api-key:latest" \
+            --set-env-vars "^|^NODE_ENV=production|STORE=memory|AUDIT_SINK=console|CONTACT_STORE=firestore|CONTACT_FIRESTORE_COLLECTION=enquiries|FIRESTORE_PROJECT_ID=${{ vars.GCP_PROJECT_ID }}|CONTACT_ALLOWED_ORIGINS=${{ vars.CONTACT_ALLOWED_ORIGINS }}|CONTACT_INBOX=${{ vars.CONTACT_INBOX }}|MAILER_PROVIDER=${{ vars.MAILER_PROVIDER }}|MAILER_FROM=${{ vars.MAILER_FROM }}|MAILER_SMTP_HOST=${{ vars.MAILER_SMTP_HOST }}|MAILER_SMTP_PORT=${{ vars.MAILER_SMTP_PORT }}|MAILER_SMTP_SECURE=false|MAILER_SMTP_USER=${{ vars.MAILER_SMTP_USER }}" \
+            --set-secrets "JWT_SECRET=jwt-secret:latest,VENDING_MASTER_SECRET=vending-master-secret:latest,BILLING_WEBHOOK_SECRET=billing-webhook-secret:latest,MAILER_API_KEY=mailer-api-key:latest,MAILER_SMTP_PASS=mailer-smtp-pass:latest" \
             --quiet
 
       - name: Smoke test
