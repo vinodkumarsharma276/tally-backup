@@ -37,10 +37,12 @@ jobs:
 
       # Tagging by commit SHA keeps every revision traceable to source, and
       # makes a rollback a redeploy of a known-good tag rather than a rebuild.
+      # --suppress-logs: streaming build logs needs project-wide Viewer, which the
+      # deployer deliberately does not have. The build still runs and is waited on.
       - name: Build image
         env:
           IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/backup-genie/control-plane:${{ github.sha }}
-        run: gcloud builds submit server --tag "$IMAGE" --quiet
+        run: gcloud builds submit server --tag "$IMAGE" --suppress-logs --quiet
 
       - name: Deploy revision
         env:
