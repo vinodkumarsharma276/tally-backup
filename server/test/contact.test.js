@@ -93,6 +93,27 @@ async function main() {
     const limited = await post(valid);
     check('rate limit kicks in (429)', limited.status === 429);
 
+    // Several recipients from one CONTACT_INBOX value.
+    const multiConfig = loadConfig({
+      STORE: 'memory',
+      MAILER_PROVIDER: 'dev',
+      CONTACT_INBOX: ' sales@backupgenie.app , owner@example.com ',
+      CONTACT_ALLOWED_ORIGINS: ORIGIN,
+      CONTACT_STORE: 'memory',
+      NODE_ENV: 'test',
+    });
+    check('inbox list is trimmed', multiConfig.contact.inbox === 'sales@backupgenie.app,owner@example.com');
+    const multiMailer = new DevMailer(multiConfig);
+    const multiApp = createApp({ config: multiConfig, store, vendingProvider: createVendingProvider(multiConfig), billingProvider: null, mailer: multiMailer, enquiryStore: new MemoryEnquiryStore() });
+    const multiServer = await new Promise((resolve) => { const s = multiApp.listen(0, () => resolve(s)); });
+    const multiResp = await fetch(`http://127.0.0.1:${multiServer.address().port}/v1/contact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(valid),
+    });
+    multiServer.close();
+    check('delivers to every recipient', multiResp.status === 200 && multiMailer.sent[0].to === 'sales@backupgenie.app,owner@example.com');
+
     // With no inbox configured the endpoint must not silently swallow enquiries.
     const offConfig = loadConfig({ STORE: 'memory', MAILER_PROVIDER: 'dev', NODE_ENV: 'test' });
     const offApp = createApp({ config: offConfig, store, vendingProvider: createVendingProvider(offConfig), billingProvider: null, mailer: new DevMailer(offConfig) });

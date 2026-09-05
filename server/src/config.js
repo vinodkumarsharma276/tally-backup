@@ -94,8 +94,13 @@ function loadConfig(env = process.env) {
     },
     // Public website enquiry form (site/ -> POST /v1/contact).
     contact: {
-      // Where enquiries are delivered. Empty disables the endpoint.
-      inbox: env.CONTACT_INBOX || '',
+      // Where enquiries are delivered. Comma-separated for several recipients.
+      // Empty disables email notification (enquiries are still persisted).
+      inbox: String(env.CONTACT_INBOX || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join(','),
       // Exact browser origins allowed to POST the form (CORS allow-list).
       allowedOrigins: String(env.CONTACT_ALLOWED_ORIGINS || '')
         .split(',')
