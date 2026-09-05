@@ -26,6 +26,7 @@ const SnapshotStore = require('../src/versioning/SnapshotStore');
 const VersionedBackup = require('../src/versioning/VersionedBackup');
 const { resolveObjectStore } = require('../src/versioning/createObjectStore');
 const { createBackend, testStorageProfile } = require('../src/versioning/backends');
+const { ManagedControlPlaneClient } = require('../src/versioning/ManagedControlPlaneClient');
 const { PROGRESS_PREFIX } = require('../src/utils/cliProgress');
 const { statusIconBuffer } = require('./trayIcon');
 const { acceptRepository } = require('../src/versioning/RepoMarker');
@@ -1115,9 +1116,38 @@ function registerIpc() {
   ipcMain.handle('email:test', async () => {
     const config = await loadConfig();
     if (!config.email || !config.email.enabled) throw new Error('Email is disabled in configuration.');
+
+    // Company mode has no SMTP credentials on this machine, so the test has to
+    // go through the relay the real reports use.
+    if (config.email.mode === 'company') {
+      const { resolveRelayIdentity, recipientsFor } = require('../src/utils/reportEmail');
+      const { resolveSecretValue } = require('../src/utils/SecretStore');
+      const identity = resolveRelayIdentity(config);
+      if (!identity) throw new Error('Enter the service URL, account ID and licence key first.');
+      const licenseKey = await resolveSecretValue(identity.licenseKey, { required: false });
+      if (!licenseKey) throw new Error('The licence key is missing.');
+      const recipients = recipientsFor(config, null);
+      if (!recipients.length) throw new Error('Add at least one recipient.');
+      const client = new ManagedControlPlaneClient({
+        baseUrl: identity.controlPlaneUrl,
+        tenantId: identity.tenantId,
+        licenseKey,
+      });
+      for (const to of recipients) {
+        await client.sendEmailReport({
+          to,
+          subject: `${config.email.subject || 'Backup Genie Report'} — test`,
+          html: '<p>This is a test email from Backup Genie. Your report delivery is configured correctly.</p>',
+        });
+      }
+      appendDesktopLog(`Test email relayed to ${recipients.length} recipient(s) via ${identity.controlPlaneUrl}.`);
+      return true;
+    }
+
     const service = new EmailService(config.email);
     await service.initialize();
     await service.sendTestEmail();
+    appendDesktopLog('Test email sent via customer SMTP.');
     return true;
   });
   ipcMain.handle('system:open-path', async (_event, targetPath) => shell.openPath(targetPath));
