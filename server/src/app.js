@@ -45,7 +45,18 @@ function createRateLimiter(maxPerHour) {
 function createApp({ config, store, vendingProvider, billingProvider, audit = new NullAuditLog(), mailer = null, enquiryStore = null, verifyIdToken = verifyGoogleIdToken }) {
   const app = express();
 
-  app.get('/healthz', (req, res) => res.json({ ok: true, service: 've-tally-control-plane' }));
+  // `/healthz` is swallowed by Google Frontend on Cloud Run and never reaches
+  // the container, so `/health` is the probe path that works everywhere.
+  const health = (req, res) => res.json({ ok: true, service: 've-tally-control-plane' });
+  app.get('/health', health);
+  app.get('/healthz', health);
+
+  // Browsers land here; answer with something better than Express's "Cannot GET /".
+  app.get('/', (req, res) => res.json({
+    service: 've-tally-control-plane',
+    status: 'ok',
+    docs: 'https://github.com/vinodkumarsharma276/tally-backup/tree/main/server',
+  }));
 
   // Billing webhooks need the RAW body for signature verification, so this route
   // is registered before the JSON body parser.
