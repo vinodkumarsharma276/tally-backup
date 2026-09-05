@@ -32,18 +32,28 @@ jobs:
       - name: Run engine tests
         run: npm test
 
-  # The control plane only needs express/jsonwebtoken/nodemailer, so it must not
-  # wait on the desktop app's native dependencies.
+  # The control-plane suite deliberately exercises the desktop <-> control-plane
+  # loop, so it imports root modules (reportEmail, backends, ManagedControlPlaneClient)
+  # and needs their runtime deps — winston, keytar and friends. Only devDependencies
+  # (electron, electron-builder, vite) can be skipped here.
   server:
     runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: server/package-lock.json
-      - name: Install dependencies
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+      - name: Install libsecret
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
+      - name: Install root runtime dependencies
+        run: npm ci --omit=dev --prefer-offline --no-audit --no-fund
+      - name: Install control plane dependencies
         working-directory: server
         run: npm ci --prefer-offline --no-audit --no-fund
       - name: Run control plane tests
