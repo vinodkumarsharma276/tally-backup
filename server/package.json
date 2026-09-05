@@ -8,14 +8,14 @@
     "start": "node src/index.js",
     "dev": "node src/index.js",
     "send-test-email": "node tools/send-test-email.js",
-    "test": "node test/e2e.js && node test/billing.test.js && node test/quota.test.js && node test/audit.test.js && node test/mailer.test.js && node test/identity.test.js && node test/contact.test.js",
+    "test": "node test/e2e.js && node test/billing.test.js && node test/quota.test.js && node test/audit.test.js && node test/mailer.test.js && node test/identity.test.js && node test/contact.test.js && node test/seeded-relay.test.js",
     "test:e2e": "node test/e2e.js",
     "test:billing": "node test/billing.test.js",
     "test:quota": "node test/quota.test.js",
     "test:audit": "node test/audit.test.js",
     "test:mailer": "node test/mailer.test.js",
     "test:identity": "node test/identity.test.js",
-    "test:contact": "node test/contact.test.js"
+    "test:contact": "node test/contact.test.js && node test/seeded-relay.test.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

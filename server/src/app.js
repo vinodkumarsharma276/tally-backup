@@ -45,6 +45,27 @@ function createRateLimiter(maxPerHour) {
 function createApp({ config, store, vendingProvider, billingProvider, audit = new NullAuditLog(), mailer = null, enquiryStore = null, verifyIdToken = verifyGoogleIdToken }) {
   const app = express();
 
+  // One structured line per request, so a failing install can be traced in
+  // Cloud Logging without reproducing it locally.
+  if (config.requestLog) {
+    app.use((req, res, next) => {
+      const startedAt = Date.now();
+      res.on('finish', () => {
+        console.log(JSON.stringify({
+          kind: 'request',
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          ms: Date.now() - startedAt,
+          tenantId: req.tenantId || undefined,
+          ip: clientIp(req),
+          ua: String(req.headers['user-agent'] || '').slice(0, 120),
+        }));
+      });
+      next();
+    });
+  }
+
   // `/healthz` is swallowed by Google Frontend on Cloud Run and never reaches
   // the container, so `/health` is the probe path that works everywhere.
   const health = (req, res) => res.json({ ok: true, service: 've-tally-control-plane' });

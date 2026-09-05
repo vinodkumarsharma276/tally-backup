@@ -11,13 +11,18 @@ const { createAuditLog } = require('./audit');
 const { createMailer } = require('./mailer');
 const { createEnquiryStore } = require('./contact');
 const { createApp } = require('./app');
-const { seedDemo } = require('./seed');
+const { seedDemo, seedConfiguredTenants } = require('./seed');
 
 async function main() {
   const config = loadConfig();
   const store = await createStore(config);
   if (config.nodeEnv !== 'production') {
     await seedDemo(store);
+  }
+  // Declared tenants are seeded in every environment, including production.
+  const seededTenants = await seedConfiguredTenants(store, config);
+  if (seededTenants.length) {
+    console.log(`[control-plane] seeded ${seededTenants.length} tenant(s): ${seededTenants.join(', ')}`);
   }
   const vendingProvider = createVendingProvider(config);
   const billingProvider = createBillingProvider(config);
