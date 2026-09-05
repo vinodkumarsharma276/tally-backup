@@ -37,12 +37,29 @@ jobs:
 
       # Tagging by commit SHA keeps every revision traceable to source, and
       # makes a rollback a redeploy of a known-good tag rather than a rebuild.
-      # --suppress-logs: streaming build logs needs project-wide Viewer, which the
-      # deployer deliberately does not have. The build still runs and is waited on.
+      # Submit async and poll. gcloud's synchronous wait tries to read the build's
+      # logs from Google's own logs bucket, which needs project-wide Viewer -- a
+      # role the deploy identity deliberately does not have.
       - name: Build image
         env:
           IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/backup-genie/control-plane:${{ github.sha }}
-        run: gcloud builds submit server --tag "$IMAGE" --suppress-logs --quiet
+        run: |
+          set -euo pipefail
+          BUILD_ID=$(gcloud builds submit server --tag "$IMAGE" --async --format='value(id)' --quiet)
+          echo "Build $BUILD_ID submitted"
+          for _ in $(seq 1 90); do
+            STATUS=$(gcloud builds describe "$BUILD_ID" --format='value(status)')
+            case "$STATUS" in
+              SUCCESS) echo "Build succeeded"; exit 0 ;;
+              FAILURE|TIMEOUT|CANCELLED|EXPIRED|INTERNAL_ERROR)
+                echo "::error::Build $BUILD_ID finished with status $STATUS"
+                echo "Logs: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=${{ vars.GCP_PROJECT_ID }}"
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Timed out waiting for build $BUILD_ID"
+          exit 1
 
       - name: Deploy revision
         env:
