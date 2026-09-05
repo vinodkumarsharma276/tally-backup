@@ -786,6 +786,12 @@ function startChildOperation(type, args = {}) {
     },
   });
 
+  // The exact command line, so a failed run can be reproduced from the log.
+  appendDesktopLog(
+    `Started ${type} runId=${runId} pid=${child.pid} origin=${args.origin || 'manual'} ` +
+    `script=${path.basename(script)} args=[${scriptArgs.join(' ')}] cwd=${operationWorkingDirectory()}`
+  );
+
   const startedAt = new Date().toISOString();
   if (!isAuth) {
     currentOperation = {

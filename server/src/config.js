@@ -120,6 +120,16 @@ function loadConfig(env = process.env) {
       },
     },
     graceRetentionDays: int(env.GRACE_RETENTION_DAYS, 15),
+    // Real installs that may authenticate, declared as JSON:
+    //   [{"id":"acme","licenseKey":"...","planId":"pro","email":"..."}]
+    // Re-seeded on every boot so identities survive cold starts while the
+    // tenant store is still in-memory.
+    seedTenants: (() => {
+      const parsed = safeJson(env.SEED_TENANTS, []);
+      return Array.isArray(parsed) ? parsed : [];
+    })(),
+    // Log one line per HTTP request. Off by default so tests stay quiet.
+    requestLog: bool(env.REQUEST_LOG, env.NODE_ENV === 'production'),
   };
 }
 
