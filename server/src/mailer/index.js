@@ -8,6 +8,14 @@
  * Providers: dev (records in memory / logs, for offline tests), resend, sendgrid.
  */
 
+/** Providers with a structured API need a list; SMTP takes the string as-is. */
+function recipients(to) {
+  return String(to || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 class DevMailer {
   constructor(config) {
     this.config = config;
@@ -33,7 +41,7 @@ class ResendMailer {
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.config.mailer.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: this.config.mailer.from, to: [to], subject, html, ...(replyTo ? { reply_to: replyTo } : {}) }),
+      body: JSON.stringify({ from: this.config.mailer.from, to: recipients(to), subject, html, ...(replyTo ? { reply_to: replyTo } : {}) }),
     });
     if (!resp.ok) {
       const detail = await resp.text().catch(() => '');
@@ -58,7 +66,7 @@ class SendgridMailer {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.config.mailer.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        personalizations: [{ to: [{ email: to }] }],
+        personalizations: [{ to: recipients(to).map((email) => ({ email })) }],
         from: { email: fromEmail },
         ...(replyTo ? { reply_to: { email: replyTo } } : {}),
         subject,
