@@ -103,12 +103,16 @@ async function migrateConfigSecrets(config, configPath, { removeLegacyFiles = tr
 async function secretStatus(config) {
   const status = {
     emailPassword: false,
+    relayLicenseKey: false,
     googleCredentials: false,
     googleToken: false,
     storageProfiles: {},
   };
   status.emailPassword = isSecretRef(config.email?.smtp?.auth?.pass)
     ? await hasSecret(config.email.smtp.auth.pass)
+    : false;
+  status.relayLicenseKey = isSecretRef(config.email?.relay?.licenseKey)
+    ? await hasSecret(config.email.relay.licenseKey)
     : false;
   status.googleCredentials = isSecretRef(config.googleDrive?.credentialsPath)
     ? await hasSecret(config.googleDrive.credentialsPath)
