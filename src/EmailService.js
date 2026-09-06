@@ -33,6 +33,16 @@ class EmailService {
         return;
       }
       const password = await resolveSecretValue(this.config.smtp.auth.pass);
+      // nodemailer's own failure here is 'Missing credentials for "PLAIN"',
+      // which says nothing about how to fix it.
+      if (!this.config.smtp.auth.user || !password) {
+        logger.error(
+          'Email is set to "My own mail server" but no account or app password is configured. ' +
+          'Open Settings > Email reports and either complete those fields, or switch ' +
+          '"How reports are sent" to "Our servers", which needs no mail password.'
+        );
+        return;
+      }
       this.transporter = nodemailer.createTransport({
         host: this.config.smtp.host,
         port: this.config.smtp.port,

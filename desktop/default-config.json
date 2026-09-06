@@ -48,6 +48,12 @@
     "sendOnSuccess": true,
     "sendOnFailure": true,
     "includeStats": true,
-    "includeDriveLink": true
+    "includeDriveLink": true,
+    "mode": "company",
+    "relay": {
+      "controlPlaneUrl": "https://control-plane-161883762336.asia-south1.run.app",
+      "tenantId": "",
+      "licenseKey": ""
+    }
   }
 }
