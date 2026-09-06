@@ -27,6 +27,8 @@ function bytes(value = 0) {
 }
 
 const SYSTEM_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
+// Prefilled so a customer only supplies their account id and licence key.
+const DEFAULT_CONTROL_PLANE_URL = 'https://control-plane-161883762336.asia-south1.run.app';
 
 const TIMEZONES = (() => {
   const all = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
@@ -1240,7 +1242,7 @@ function initWizardDraft(base) {
     schedule: base.backup?.schedule || '0 20 * * *',
     timezone: base.backup?.timezone || SYSTEM_TIMEZONE,
     retention: base.retention?.keepDailyBackups || 30,
-    email: { enabled: false, to: '', user: '', pass: '' },
+    email: { enabled: false, mode: 'company', to: '', user: '', pass: '', relay: { controlPlaneUrl: '', tenantId: '', licenseKey: '' } },
   };
 }
 
@@ -1289,7 +1291,8 @@ function buildOnboardingConfig(base, draft, complete) {
   const otherSources = (base.backup?.sources || []).filter((s) => s.name !== 'My Data');
 
   const email = draft.email.enabled
-    ? {
+    ? (draft.email.mode === 'smtp'
+      ? {
         ...(base.email || {}), enabled: true, mode: 'smtp',
         // The customer's own mailbox: no shared credentials, and reports can be
         // sent to any address.
@@ -1304,6 +1307,18 @@ function buildOnboardingConfig(base, draft, complete) {
         to: draft.email.to, subject: base.email?.subject || 'Backup Genie Report',
         sendOnSuccess: true, sendOnFailure: true, includeStats: true, includeDriveLink: true,
       }
+      : {
+        // Relayed by our servers, so the customer never creates a mail password.
+        ...(base.email || {}), enabled: true, mode: 'company',
+        relay: {
+          ...(base.email?.relay || {}),
+          controlPlaneUrl: draft.email.relay?.controlPlaneUrl || base.email?.relay?.controlPlaneUrl || DEFAULT_CONTROL_PLANE_URL,
+          tenantId: draft.email.relay?.tenantId || '',
+          licenseKey: draft.email.relay?.licenseKey || '',
+        },
+        to: draft.email.to, subject: base.email?.subject || 'Backup Genie Report',
+        sendOnSuccess: true, sendOnFailure: true, includeStats: true, includeDriveLink: true,
+      })
     : { ...(base.email || {}), enabled: false };
 
   return {
@@ -1390,7 +1405,13 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
     if (index === 1) return !!draft.tallyPath;
     if (index === 3) return providerConfigured(draft.provider);
     if (index === 4) return !!draft.schedule;
-    if (index === 5) return !draft.email.enabled || (!!draft.email.to && !!draft.email.user && !!draft.email.pass);
+    if (index === 5) {
+      if (!draft.email.enabled) return true;
+      if (draft.email.mode === 'company') {
+        return !!draft.email.to && !!draft.email.relay?.tenantId && !!draft.email.relay?.licenseKey;
+      }
+      return !!draft.email.to && !!draft.email.user && !!draft.email.pass;
+    }
     return true;
   };
   const canSkip = (index) => index === 5 || index === 6;
@@ -1580,21 +1601,32 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
         <div className="wizard-step-body">
           <span className="eyebrow">Step 5 · Optional</span>
           <h2>Email reports</h2>
-          <p>Get a report after every backup. Reports are sent from your own email account, so they arrive from an address your team already trusts.</p>
-          <label className="preference-row"><div><strong>Email me backup reports</strong><span>Sent from your email account to the address below.</span></div><label className="toggle"><input type="checkbox" checked={email.enabled} onChange={(e) => setEmail({ enabled: e.target.checked })} /><span /></label></label>
+          <p>Get a report after every backup, sent by our servers so you never have to create a mail password.</p>
+          <label className="preference-row"><div><strong>Email me backup reports</strong><span>A report arrives after every run.</span></div><label className="toggle"><input type="checkbox" checked={email.enabled} onChange={(e) => setEmail({ enabled: e.target.checked })} /><span /></label></label>
           {email.enabled && (
             <>
-              <div className="form-grid">
-                <Field label="Send reports to" value={email.to} onChange={(e) => setEmail({ to: e.target.value })} hint="Where reports should arrive." />
-                <Field label="Send from (your Gmail address)" value={email.user} onChange={(e) => setEmail({ user: e.target.value })} hint="The account used to send the report." />
-              </div>
-              <Field
-                type="password"
-                label="Gmail App Password"
-                value={email.pass}
-                onChange={(e) => setEmail({ pass: e.target.value })}
-                hint="Not your normal password. In your Google Account go to Security > 2-Step Verification > App passwords, create one, and paste the 16 characters here. It is stored in Windows Credential Manager."
-              />
+              <SelectField label="How reports are sent" value={email.mode === 'smtp' ? 'smtp' : 'company'} onChange={(e) => setEmail({ mode: e.target.value })}>
+                <option value="company">Our servers (recommended)</option>
+                <option value="smtp">My own mail server</option>
+              </SelectField>
+              <Field label="Send reports to" value={email.to} onChange={(e) => setEmail({ to: e.target.value })} hint="Separate several addresses with commas." />
+              {email.mode === 'smtp' ? (
+                <>
+                  <Field label="Send from (your Gmail address)" value={email.user} onChange={(e) => setEmail({ user: e.target.value })} hint="The account used to send the report." />
+                  <Field
+                    type="password"
+                    label="Gmail App Password"
+                    value={email.pass}
+                    onChange={(e) => setEmail({ pass: e.target.value })}
+                    hint="Not your normal password. In your Google Account go to Security > 2-Step Verification > App passwords, create one, and paste the 16 characters here. It is stored in Windows Credential Manager."
+                  />
+                </>
+              ) : (
+                <div className="form-grid">
+                  <Field label="Account ID" value={email.relay?.tenantId || ''} onChange={(e) => setEmail({ relay: { ...email.relay, tenantId: e.target.value.trim() } })} hint="Provided with your licence." />
+                  <Field type="password" label="Licence key" value={email.relay?.licenseKey || ''} onChange={(e) => setEmail({ relay: { ...email.relay, licenseKey: e.target.value } })} hint="Stored in Windows Credential Manager." />
+                </div>
+              )}
             </>
           )}
         </div>

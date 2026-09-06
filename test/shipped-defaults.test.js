@@ -25,10 +25,13 @@ async function main() {
   check('no personal paths are baked in', !/vinodsharma|personal_workspace/i.test(raw));
   check('no email address is baked in', !/@gmail\.com|@resend\.dev/i.test(raw));
 
-  // Email must default to the customer's own SMTP, never the company relay,
-  // because relay mode needs a deployed service and a shared API key.
-  check('email does not default to company relay', config.email?.mode !== 'company', `mode=${config.email?.mode}`);
-  check('no relay block is shipped', !config.email?.relay);
+  // Relay mode is now the shipped default: the service is deployed, and it
+  // spares customers from creating a mail app password. What must never ship is
+  // a credential -- the service URL is public, the licence key is per install.
+  check('email defaults to the company relay', config.email?.mode === 'company', `mode=${config.email?.mode}`);
+  check('relay points at a deployed https service', /^https:\/\//.test(config.email?.relay?.controlPlaneUrl || ''));
+  check('no tenant id is shipped', !config.email?.relay?.tenantId);
+  check('no licence key is shipped', !config.email?.relay?.licenseKey);
   check('email starts disabled', config.email?.enabled === false);
   check('no SMTP password is shipped', !config.email?.smtp?.auth?.pass);
   check('no SMTP account is shipped', !config.email?.smtp?.auth?.user);
