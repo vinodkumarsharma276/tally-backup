@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { company, nav } from '../content.js';
+import { company, nav, product } from '../content.js';
 import { BrandLogo } from '../../../shared/Brand.jsx';
 
 export default function Header() {
@@ -32,9 +32,11 @@ export default function Header() {
         </nav>
 
         <div className="header-cta">
+          {product.downloadsEnabled && (
           <a className="btn btn-primary btn-sm" href="#download">
             Download
           </a>
+          )}
           <button
             className="nav-toggle"
             type="button"

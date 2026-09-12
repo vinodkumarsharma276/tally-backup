@@ -24,6 +24,7 @@ export const company = {
 
 export const product = {
   name: 'Backup Genie',
+  downloadsEnabled: false,
   version: 'v0.0.1',
   versionLabel: 'Starter · Early access',
   headline: 'Any folder. Any day. Back in one click.',
@@ -85,7 +86,9 @@ export const steps = [
   {
     n: '01',
     title: 'Install',
-    body: 'Download the Windows Starter installer and run setup. No scripts or command line needed.',
+    body: product.downloadsEnabled
+      ? 'Download the Windows Starter installer and run setup. No scripts or command line needed.'
+      : 'Contact us about early access to the Windows Starter edition. Public downloads are not yet available.',
   },
   {
     n: '02',
@@ -247,12 +250,14 @@ export const faqs = [
   },
   {
     q: 'Can I try it before paying?',
-    a: 'Yes. Download the Starter edition for Windows and connect your Google Drive. You can install it yourself; contact us for help or to activate company email reporting. No payment is required for this early-access evaluation.',
+    a: product.downloadsEnabled
+      ? 'Yes. Download the Starter edition for Windows and connect your Google Drive. You can install it yourself; contact us for help or to activate company email reporting. No payment is required for this early-access evaluation.'
+      : 'Contact us about an early-access evaluation of Starter for Windows. Public downloads are not yet available. Company email reporting requires activation.',
   },
 ];
 
 export const nav = [
-  { href: '#download', label: 'Download' },
+  ...(product.downloadsEnabled ? [{ href: '#download', label: 'Download' }] : []),
   { href: '#features', label: 'Features' },
   { href: '#how', label: 'How it works' },
   { href: '#roadmap', label: 'Roadmap' },
