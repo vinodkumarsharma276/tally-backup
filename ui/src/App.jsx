@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { BrandMark } from '../../shared/Brand.jsx';
 
 const api = window.tallyDesktop;
 const PAGES = [
@@ -245,7 +246,7 @@ function Overview({ config, operation, progress, operationLogs, startBackup, sta
         <div className="shield-visual">
           <div className="shield-ring ring-one" />
           <div className="shield-ring ring-two" />
-          <div className="shield-core">✓</div>
+          <BrandMark large />
           <span>Protected</span>
         </div>
       </section>
@@ -1683,7 +1684,7 @@ function OnboardingWizard({ baseConfig, onSavedConfig, onFinish, operation, prog
     <div className="wizard-overlay">
       <div className="wizard">
         <aside className="wizard-sidebar">
-          <div className="brand"><div className="brand-mark">BG</div><div><strong>Backup Genie</strong><span>Guided setup</span></div><button className="theme-toggle" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={onToggleTheme}>{theme === 'dark' ? '☀' : '☾'}</button></div>
+          <div className="brand"><BrandMark /><div><strong>Backup Genie</strong><span>Guided setup</span></div><button className="theme-toggle" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={onToggleTheme}>{theme === 'dark' ? '☀' : '☾'}</button></div>
           <ol className="wizard-steps">
             {WIZARD_STEPS.map((label, index) => (
               <li key={label} className={cx(index === step && 'active', index < step && 'done', index <= maxVisited && 'navigable')}>
@@ -2049,13 +2050,13 @@ export default function App() {
     finally { setEmailTesting(false); }
   };
 
-  if (!config) return <div className="loading-screen"><div className="brand-mark large">BG</div><div className="loading-bar"><span /></div><p>Preparing your backup workspace…</p></div>;
+  if (!config) return <div className="loading-screen"><BrandMark large /><div className="loading-bar"><span /></div><p>Preparing your backup workspace…</p></div>;
 
   // Accounts are optional: with no service configured the app is fully usable.
   if (!session.signedIn && !offlineMode && session.signInAvailable) {
     return (
       <div className="loading-screen sign-in-screen">
-        <div className="brand-mark large">BG</div>
+        <BrandMark large />
         <h1>Backup Genie</h1>
         <p>Sign in to manage your backups. Scheduled backups keep running either way.</p>
         <div className="sign-in-actions">
@@ -2097,7 +2098,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><div className="brand-mark">BG</div><div><strong>Backup Genie</strong><span>Business protection</span></div></div>
+        <div className="brand"><BrandMark /><div><strong>Backup Genie</strong><span>Business protection</span></div></div>
         <nav>{PAGES.map(([key, label, icon]) => <button key={key} className={cx(page === key && 'active')} onClick={() => setPage(key)}><span>{icon}</span>{label}</button>)}</nav>
         <div className="sidebar-account">
           {session.signedIn ? (

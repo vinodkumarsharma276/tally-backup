@@ -1,5 +1,6 @@
 import { product, stats } from '../content.js';
 import { Reveal, useCountUp } from '../useReveal.jsx';
+import primaryLogo from '../../../assets/branding/primary.png';
 
 function Stat({ value, suffix, label, delay }) {
   const [ref, n, visible] = useCountUp(value);
@@ -42,22 +43,7 @@ export default function Hero() {
           </Reveal>
 
           <div className="hero-visual" aria-hidden="true">
-            <div className="orb orb-a" />
-            <div className="orb orb-b" />
-            <div className="shield-stage">
-              <div className="shield-ring ring-1" />
-              <div className="shield-ring ring-2" />
-              <div className="shield-ring ring-3" />
-              <div className="orbit">
-                <span className="orbit-chip">Google Drive</span>
-                <span className="orbit-chip b">Amazon S3</span>
-              </div>
-              <div className="orbit reverse">
-                <span className="orbit-chip c">NAS</span>
-                <span className="orbit-chip d">Azure</span>
-              </div>
-              <div className="shield-core">🛡</div>
-            </div>
+            <img className="genie-hero-art" src={primaryLogo} alt="" width="640" height="574" />
           </div>
         </div>
       </section>

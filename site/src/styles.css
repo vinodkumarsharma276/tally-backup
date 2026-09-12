@@ -175,6 +175,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* animated shield */
 .hero-visual { position: relative; display: grid; place-items: center; min-height: 380px; }
+.genie-hero-art { display: block; width: min(100%, 480px); height: auto; aspect-ratio: 640 / 574; object-fit: contain; animation: float 6s ease-in-out infinite; }
 .orb { position: absolute; border-radius: 50%; filter: blur(60px); opacity: .5; animation: drift 14s ease-in-out infinite; }
 .orb-a { width: 260px; height: 260px; background: rgba(46, 212, 144, .3); top: 6%; right: 10%; }
 .orb-b { width: 220px; height: 220px; background: rgba(91, 167, 255, .22); bottom: 6%; left: 4%; animation-delay: -6s; }
@@ -400,12 +401,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .reveal { opacity: 1; transform: none; transition: none; }
-  .orb, .shield-core, .shield-ring, .orbit, .orbit-chip { animation: none !important; }
+  .orb, .shield-core, .shield-ring, .orbit, .orbit-chip, .genie-hero-art { animation: none !important; }
   * { transition-duration: .01ms !important; }
 }
 
 /* ----------------------------------------------------------------- responsive */
 @media (max-width: 1024px) {
+  .site-nav { position: absolute; top: 74px; left: 0; right: 0; flex-direction: column; background: #09141c; border-bottom: 1px solid #172832; padding: 12px 24px 20px; display: none; }
+  .site-nav.open { display: flex; }
+  .header-cta { margin-left: auto; }
+  .nav-toggle { display: grid; place-items: center; margin-left: auto; }
+  .header-cta .btn { display: none; }
   .hero-grid { grid-template-columns: 1fr; gap: 40px; }
   .hero-visual { min-height: 320px; }
   .feature-grid, .roadmap-grid { grid-template-columns: repeat(2, 1fr); }

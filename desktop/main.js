@@ -10,6 +10,7 @@ const {
   Menu,
   Notification,
   nativeImage,
+  nativeTheme,
   powerMonitor,
 } = require('electron');
 const path = require('path');
@@ -43,6 +44,7 @@ const { autoUpdater } = require('electron-updater');
 const APP_NAME = 'Backup Genie';
 let mainWindow = null;
 let tray = null;
+let trayVisualState = 'idle';
 let currentOperation = null;
 let latestProgress = null;
 let schedulerJobs = [];
@@ -189,8 +191,15 @@ function appIconImage() {
 }
 
 function createStatusImage(state = 'idle') {
-  // Electron's nativeImage cannot decode SVG on Windows, so tray icons are real
-  // PNG buffers (see desktop/trayIcon.js).
+  const theme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+  const candidate = path.join(appRoot(), 'assets', 'branding', `tray-${theme}-${state}.png`);
+  if (fs.existsSync(candidate)) {
+    const image = nativeImage.createFromPath(candidate);
+    if (!image.isEmpty()) {
+      if (process.platform === 'darwin' && state === 'idle') image.setTemplateImage(true);
+      return image;
+    }
+  }
   return nativeImage.createFromBuffer(statusIconBuffer(state, 32));
 }
 
@@ -226,7 +235,7 @@ function showMainWindow() {
 
 function showNotification(title, body, state = 'idle') {
   if (runtimeSettings.notifications === false || !Notification.isSupported()) return;
-  new Notification({ title, body, icon: createStatusImage(state), silent: false }).show();
+  new Notification({ title, body, icon: appIconImage(), silent: false }).show();
 }
 
 let updateState = { status: 'idle', version: null, progress: 0, error: null };
@@ -326,6 +335,7 @@ function updateTrayMenu() {
 }
 
 function setTrayState(state, tooltip) {
+  trayVisualState = state;
   if (!tray) return;
   if (trayResetTimer) {
     clearTimeout(trayResetTimer);
@@ -345,6 +355,9 @@ function scheduleTrayReset() {
 function createTray() {
   if (tray) return tray;
   tray = new Tray(createStatusImage('idle'));
+  nativeTheme.on('updated', () => {
+    if (tray && !tray.isDestroyed()) tray.setImage(createStatusImage(trayVisualState));
+  });
   tray.setToolTip(`${APP_NAME} — Ready`);
   tray.on('click', showMainWindow);
   tray.on('double-click', showMainWindow);

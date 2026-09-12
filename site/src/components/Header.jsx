@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { company, nav, product } from '../content.js';
+import { company, nav } from '../content.js';
+import { BrandLogo } from '../../../shared/Brand.jsx';
 
 export default function Header() {
   const [scrolled, setScrolled] = useState(false);
@@ -16,9 +17,8 @@ export default function Header() {
     <header className={`site-header${scrolled ? ' scrolled' : ''}`}>
       <div className="container header-inner">
         <a className="brand" href="#top">
-          <div className="brand-mark">BG</div>
+          <BrandLogo />
           <div className="brand-text">
-            <strong>{product.name}</strong>
             <span>by {company.name}</span>
           </div>
         </a>

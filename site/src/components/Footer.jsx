@@ -1,5 +1,6 @@
 import { company, nav, product } from '../content.js';
 import { Reveal } from '../useReveal.jsx';
+import { BrandLogo } from '../../../shared/Brand.jsx';
 
 export default function Footer() {
   return (
@@ -27,9 +28,8 @@ export default function Footer() {
           <div className="footer-grid">
             <div className="footer-about">
               <a className="brand" href="#top">
-                <div className="brand-mark">BG</div>
+                <BrandLogo />
                 <div className="brand-text">
-                  <strong>{product.name}</strong>
                   <span>by {company.name}</span>
                 </div>
               </a>

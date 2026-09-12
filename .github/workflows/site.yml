@@ -8,6 +8,8 @@ on:
     branches: [main]
     paths:
       - 'site/**'
+      - 'shared/**'
+      - 'assets/branding/**'
       - 'vite.site.config.js'
       - '.github/workflows/site.yml'
   workflow_dispatch:
