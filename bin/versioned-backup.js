@@ -330,8 +330,12 @@ async function main(argv = process.argv.slice(2)) {
         });
       }
 
+      // `authuser` pins the link to the account that owns the folder; without it
+      // the browser opens whichever Google account happens to be active.
+      const driveAccount = backend.accountEmail ? await backend.accountEmail() : null;
       const link = backend.rootFolderId
-        ? `https://drive.google.com/drive/folders/${backend.rootFolderId}`
+        ? `https://drive.google.com/drive/folders/${backend.rootFolderId}` +
+          (driveAccount ? `?authuser=${encodeURIComponent(driveAccount)}` : '')
         : null;
 
       if (controlPlane) {
@@ -356,6 +360,7 @@ async function main(argv = process.argv.slice(2)) {
           folderName: source.backupFolderName,
           operation: 'backup',
           link,
+          account: driveAccount,
         });
       }
 
@@ -442,8 +447,10 @@ async function main(argv = process.argv.slice(2)) {
         });
         const mirrorGc = await mirrorEngine.gc({ keepDays: keepDaysFor(primaryDestination) });
 
+        const mirrorAccount = mirrorBackend.accountEmail ? await mirrorBackend.accountEmail() : null;
         const mirrorLink = mirrorBackend.rootFolderId
-          ? `https://drive.google.com/drive/folders/${mirrorBackend.rootFolderId}`
+          ? `https://drive.google.com/drive/folders/${mirrorBackend.rootFolderId}` +
+            (mirrorAccount ? `?authuser=${encodeURIComponent(mirrorAccount)}` : '')
           : null;
         overall.totalNewBytes += mirrored.bytes;
         overall.sources.push({
@@ -473,6 +480,7 @@ async function main(argv = process.argv.slice(2)) {
             folderName: mirrorSource.backupFolderName,
             operation: 'backup',
             link: mirrorLink,
+            account: mirrorAccount,
           });
         }
       }

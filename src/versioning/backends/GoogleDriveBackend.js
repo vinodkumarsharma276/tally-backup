@@ -69,6 +69,22 @@ class GoogleDriveBackend {
     return this.driveService.drive;
   }
 
+  /**
+   * Which Google account this backend is actually signed in as. Drive folder
+   * URLs carry no account context, so a report that only shows a link is
+   * ambiguous when the reader's browser is signed into several accounts.
+   */
+  async accountEmail() {
+    if (this._accountEmail !== undefined) return this._accountEmail;
+    try {
+      const res = await this.driveService.apiCall(() => this.drive.about.get({ fields: 'user(emailAddress)' }));
+      this._accountEmail = res?.data?.user?.emailAddress || null;
+    } catch {
+      this._accountEmail = null;
+    }
+    return this._accountEmail;
+  }
+
   async _retry(fn) {
     // driveService.apiCall handles transient network errors; we add backoff for
     // Drive rate-limiting (403 rateLimitExceeded / userRateLimitExceeded, 429),

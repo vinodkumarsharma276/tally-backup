@@ -275,9 +275,15 @@ class EmailService {
           </a>`
       )
       .join('');
+    // Naming the account avoids confusion when the reader's browser is signed
+    // into more than one Google account.
+    const accounts = [...new Set(links.map((link) => link.account).filter(Boolean))];
+    const accountNote = accounts.length
+      ? `<p style="color:${COLORS.muted};font-size:12px;margin:10px 0 0;">Stored in ${this.escape(accounts.join(', '))}. Sign in with that account to open the folder.</p>`
+      : '';
     return `
       <h3 style="color:${COLORS.text};font-size:15px;margin:26px 0 8px;">Open your backup</h3>
-      <div>${buttons}</div>`;
+      <div>${buttons}</div>${accountNote}`;
   }
 
   generateReportEmail(status, data) {
