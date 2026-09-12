@@ -6,6 +6,7 @@ import Faq from './components/Faq.jsx';
 import Contact from './components/Contact.jsx';
 import Footer from './components/Footer.jsx';
 import Download from './components/Download.jsx';
+import { product } from './content.js';
 
 export default function App() {
   return (
@@ -13,7 +14,7 @@ export default function App() {
       <Header />
       <main>
         <Hero />
-        <Download />
+        {product.downloadsEnabled && <Download />}
         <Features />
         <UseCases />
         <HowItWorks />

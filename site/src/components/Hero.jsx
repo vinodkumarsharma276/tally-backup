@@ -30,9 +30,11 @@ export default function Hero() {
             </h1>
             <p className="lede">{product.subhead}</p>
             <div className="hero-actions">
+              {product.downloadsEnabled && (
               <a className="btn btn-primary" href="#download">
                 Download Starter
               </a>
+              )}
               <a className="btn btn-secondary" href="#how">
                 See how it works
               </a>
