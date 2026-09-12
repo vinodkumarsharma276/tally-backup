@@ -19,6 +19,7 @@ const { fork } = require('child_process');
 const readline = require('readline');
 const crypto = require('crypto');
 const cron = require('node-cron');
+const { assertBackupEdition, assertProfileChanges } = require('../src/utils/EditionPolicy');
 
 const configPathManager = require('../src/utils/ConfigPathManager');
 const GoogleDriveService = require('../src/GoogleDriveService');
@@ -157,6 +158,7 @@ async function loadConfigForRenderer() {
 async function saveConfig(submittedConfig) {
   const target = await ensureConfig();
   const previous = await fs.readJson(target);
+  assertProfileChanges(submittedConfig, await sanitizeConfigForRenderer(previous));
   const secured = await secureConfigFromRenderer(submittedConfig, previous, target);
   validateConfig(secured.config);
   await writeConfigAtomic(target, secured.config);
@@ -759,6 +761,7 @@ function consumeOutput(stream, runId, streamName) {
 }
 
 function startChildOperation(type, args = {}) {
+  if (type === 'backup') assertBackupEdition(fs.readJsonSync(configPath()));
   // Google sign-in is interactive and touches no backup state, so it is allowed
   // to run while a backup or restore is in progress.
   const isAuth = type === 'auth-google';

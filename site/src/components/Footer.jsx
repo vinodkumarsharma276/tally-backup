@@ -12,8 +12,8 @@ export default function Footer() {
               <h2>Find out what a bad day costs you.</h2>
               <p>Then spend a few minutes making sure it never happens. Early access builds are free to evaluate.</p>
             </div>            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <a className="btn btn-primary" href="#contact">
-                Request early access
+              <a className="btn btn-primary" href="#download">
+                Download Starter
               </a>
               <a className="btn btn-ghost" href={product.docsUrl} target="_blank" rel="noreferrer noopener">
                 Read the docs

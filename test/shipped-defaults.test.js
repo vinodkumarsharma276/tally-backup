@@ -59,6 +59,8 @@ async function main() {
 
   const root = path.join(__dirname, '..');
   const manifest = await fs.readJson(path.join(root, 'package.json'));
+  check('Starter policy is packaged', manifest.build.files.includes('shared/edition.json'));
+  check('Starter installer has a distinct download name', manifest.build.win.artifactName === 'Backup-Genie-Starter-Setup.${ext}');
   for (const file of ['build/icon.png', 'build/icon.ico', 'assets/branding/tray-*.png']) {
     check(`runtime icon is packaged: ${file}`, manifest.build.files.includes(file));
   }

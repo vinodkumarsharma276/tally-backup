@@ -1,0 +1,5 @@
+{
+  "name": "Starter",
+  "backupProviders": ["google_drive"],
+  "maxGoogleDriveProfiles": 1
+}

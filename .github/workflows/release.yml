@@ -166,8 +166,8 @@ jobs:
           name: dist-${{ matrix.os }}
           if-no-files-found: error
           path: |
-            releases/desktop/Backup-Genie-Setup-*.exe
-            releases/desktop/Backup-Genie-Setup-*.exe.blockmap
+            releases/desktop/Backup-Genie-Starter-Setup.exe
+            releases/desktop/Backup-Genie-Starter-Setup.exe.blockmap
             releases/desktop/Backup-Genie-*.AppImage
             releases/desktop/Backup-Genie-*.deb
             releases/desktop/latest.yml
@@ -188,7 +188,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXE=$(find dist -name 'Backup-Genie-Setup-*.exe' | head -n1)
+          EXE=$(find dist -name 'Backup-Genie-Starter-Setup.exe' | head -n1)
           if [ -n "${EXE}" ]; then
             cp "${EXE}" "dist/Backup-Genie-Setup.exe"
             echo "Stable copy: dist/Backup-Genie-Setup.exe"

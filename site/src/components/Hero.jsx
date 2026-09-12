@@ -30,15 +30,15 @@ export default function Hero() {
             </h1>
             <p className="lede">{product.subhead}</p>
             <div className="hero-actions">
-              <a className="btn btn-primary" href="#contact">
-                Request early access
+              <a className="btn btn-primary" href="#download">
+                Download Starter
               </a>
               <a className="btn btn-secondary" href="#how">
                 See how it works
               </a>
             </div>
             <p className="hero-note">
-              Windows installer · Any folder, any file type · Your own Google Drive, S3, Azure, NAS or disk
+              Windows Starter · Any folder, any file type · One Google Drive profile
             </p>
           </Reveal>
 
@@ -54,7 +54,7 @@ export default function Hero() {
           <span>♻️ Deduplicated uploads</span>
           <span>🕒 Point-in-time restore</span>
           <span>📧 Report after every run</span>
-          <span>🖥 Runs as a Windows service</span>
+          <span>🖥 Windows desktop app</span>
         </div>
       </div>
 

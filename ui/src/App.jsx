@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BrandMark } from '../../shared/Brand.jsx';
+import edition from '../../shared/edition.json';
 
 const api = window.tallyDesktop;
 const PAGES = [
@@ -437,7 +438,7 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, op
                 }}
               >
                 <option value="versioned">Versioned — keeps daily restore points</option>
-                <option value="mirror">Exact copy — a plain folder you can open</option>
+                <option value="mirror" disabled>Exact copy — unavailable in Starter</option>
               </SelectField>
             )}
             {source.operation === 'backup' ? (
@@ -446,6 +447,7 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, op
                 <div className="destination-list">
                   {profiles
                     .filter((profileName) => {
+                      if (!edition.backupProviders.includes(config.storageProfiles[profileName]?.type)) return false;
                       // An exact copy writes plain files, so only folders qualify.
                       if (source.mode !== 'mirror') return true;
                       const type = (config.storageProfiles || {})[profileName]?.type;
@@ -461,7 +463,7 @@ function Sources({ config, setConfig, chooseDirectory, googleAccount, notify, op
                           checked={checked}
                           onChange={(event) => {
                             const next = event.target.checked
-                              ? [...selected, profileName]
+                              ? [profileName]
                               : selected.filter((n) => n !== profileName);
                             update(index, { storageProfiles: next, storageProfile: next[0] || '' });
                           }}
@@ -798,6 +800,7 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, verifyStorag
   const [unlockedProvider, setUnlockedProvider] = useState('');
 
   const addProfile = (type) => {
+    if (!edition.backupProviders.includes(type) || Object.values(profiles).filter(profile => profile.type === 'google_drive').length >= edition.maxGoogleDriveProfiles) return;
     const base = type === 'google_drive' ? 'new-google-drive' : 'new-local-storage';
     let name = base;
     let count = 2;
@@ -816,14 +819,14 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, verifyStorag
   return (
     <div className="page-stack">
       <div className="page-title-row">
-        <div><span className="eyebrow">Destinations</span><h2>Storage</h2><p>Connect customer-owned storage and test access before a backup. The provider is chosen when you add a profile and cannot be changed later.</p></div>
+        <div><span className="eyebrow">Starter edition</span><h2>Storage</h2><p>One Google Drive profile for your backups. Multiple source folders can share this destination.</p></div>
         <div className="notify-actions">
           <SaveBar dirty={dirty} saving={saving} onSave={onSave} />
-          <Button variant="secondary" onClick={() => addProfile('google_drive')}>+ Google Drive</Button>
-          <Button onClick={() => addProfile('local')}>+ Local folder</Button>
+          <Button variant="secondary" disabled={Object.values(profiles).filter(profile => profile.type === 'google_drive').length >= edition.maxGoogleDriveProfiles} onClick={() => addProfile('google_drive')}>+ Google Drive</Button>
         </div>
       </div>
       <div className="storage-grid">
+        <p className="field-hint">Starter: one Google Drive profile for all backup sources. Existing storage remains accessible for restores.</p>
         {Object.entries(profiles).map(([name, profile]) => (
           <article className="card storage-card" key={name}>
             <div className="storage-head"><div className={`provider-logo provider-${profile.type}`}>{profile.type === 'google_drive' ? 'G' : profile.type === 'azure_blob' ? 'A' : profile.type === 's3' ? 'S3' : profile.type === 'network' ? 'N' : profile.type === 'managed' ? 'VE' : 'L'}</div><div><h3>{name}</h3><span>{storageName(profile.type)}</span></div><Pill tone={profile.tenancy === 'managed' ? 'violet' : 'neutral'}>{profile.tenancy || 'customer'}</Pill></div>
@@ -831,10 +834,10 @@ function Storage({ config, setConfig, chooseDirectory, testStorage, verifyStorag
               <Field label="Profile name" defaultValue={name} onBlur={(event) => rename(name, event.target.value.trim())} />
               <div className="field">
                 <span className="field-label">Provider</span>
-                <select value={profile.type} disabled={profilesInUse.includes(name) && unlockedProvider !== name} onChange={(event) => update(name, providerDefaults(event.target.value, name, profile))}>
+                <select value={profile.type} disabled={(profilesInUse.includes(name) && unlockedProvider !== name) || !edition.backupProviders.includes(profile.type)} onChange={(event) => update(name, providerDefaults(event.target.value, name, profile))}>
                   {PROVIDER_CHOICES.map(([value, label]) => (
-                    <option key={value} value={value} disabled={!SUPPORTED_PROVIDERS.includes(value) && profile.type !== value}>
-                      {SUPPORTED_PROVIDERS.includes(value) ? label : `${label} — not available yet`}
+                    <option key={value} value={value} disabled={!edition.backupProviders.includes(value)}>
+                      {edition.backupProviders.includes(value) ? label : `${label} — not included in Starter`}
                     </option>
                   ))}
                 </select>
@@ -1115,7 +1118,6 @@ function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, 
 
 const STORAGE_OPTIONS = [
   { type: 'google_drive', title: 'Google Drive', desc: 'Back up to your own Google Drive account.', icon: 'G' },
-  { type: 'local', title: 'Local / external drive', desc: 'A second drive or folder on this PC.', icon: 'L' },
 ];
 
 const WEEKDAYS = [['1', 'Monday'], ['2', 'Tuesday'], ['3', 'Wednesday'], ['4', 'Thursday'], ['5', 'Friday'], ['6', 'Saturday'], ['0', 'Sunday']];
