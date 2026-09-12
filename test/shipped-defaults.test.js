@@ -57,6 +57,22 @@ async function main() {
   const literalSecret = /"(pass|licenseKey|secretAccessKey|sasToken)"\s*:\s*"(?!secret:|env:)[^"]+"/.exec(raw);
   check('no literal secrets anywhere', !literalSecret, literalSecret && literalSecret[0]);
 
+  const root = path.join(__dirname, '..');
+  const manifest = await fs.readJson(path.join(root, 'package.json'));
+  for (const file of ['build/icon.png', 'build/icon.ico', 'assets/branding/tray-*.png']) {
+    check(`runtime icon is packaged: ${file}`, manifest.build.files.includes(file));
+  }
+  const windowsIcon = await fs.readFile(path.join(root, manifest.build.win.icon));
+  check('Windows icon has multiple resolutions', windowsIcon.readUInt16LE(2) === 1 && windowsIcon.readUInt16LE(4) >= 6);
+  const macIcon = await fs.readFile(path.join(root, manifest.build.mac.icon));
+  check('macOS icon container is valid', macIcon.toString('ascii', 0, 4) === 'icns' && macIcon.readUInt32BE(4) === macIcon.length);
+  for (const theme of ['dark', 'light']) {
+    for (const state of ['idle', 'running', 'success', 'failed', 'paused']) {
+      const trayIcon = await fs.readFile(path.join(root, 'assets/branding', `tray-${theme}-${state}.png`));
+      check(`${theme} ${state} tray icon is a 32px PNG`, trayIcon.toString('ascii', 1, 4) === 'PNG' && trayIcon.readUInt32BE(16) === 32 && trayIcon.readUInt32BE(20) === 32);
+    }
+  }
+
   const failed = results.filter(([, ok]) => !ok);
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
   process.exit(failed.length ? 1 : 0);

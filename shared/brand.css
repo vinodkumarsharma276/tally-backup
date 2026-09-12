@@ -1,0 +1,10 @@
+.genie-mark, .genie-logo { display: inline-grid; flex: none; margin: 0; vertical-align: middle; }
+.genie-mark { width: 42px; height: 42px; }
+.genie-mark-large { width: 96px; height: 96px; }
+.brand .genie-mark { margin: 0; }
+.shield-visual > .genie-mark { position: relative; bottom: auto; z-index: 2; }
+.genie-logo { width: 174px; height: 56px; max-width: 100%; }
+.genie-mark img, .genie-logo img { grid-area: 1 / 1; width: 100%; height: 100%; object-fit: contain; }
+.genie-mark .genie-on-light, .genie-logo .genie-on-light { display: none; }
+[data-theme='light'] .genie-on-dark { display: none; }
+[data-theme='light'] .genie-mark .genie-on-light, [data-theme='light'] .genie-logo .genie-on-light { display: block; }
