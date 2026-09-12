@@ -35,6 +35,7 @@ const { verifyRepository, acceptRepository, readMarker } = require('../src/versi
 const { mirrorRepository } = require('../src/versioning/RepositoryMirror');
 const MirrorBackup = require('../src/MirrorBackup');
 const { googleConfigFor } = require('../src/utils/googleAuth');
+const { assertBackupEdition } = require('../src/utils/EditionPolicy');
 const configPathManager = require('../src/utils/ConfigPathManager');
 const VersionedBackup = require('../src/versioning/VersionedBackup');
 const { renderBackupProgress, finishProgress, emitMachineEvent } = require('../src/utils/cliProgress');
@@ -147,6 +148,14 @@ async function main(argv = process.argv.slice(2)) {
     throw new Error(`Configuration file not found: ${configPath}`);
   }
   const config = await fs.readJson(configPath);
+  if (process.versions.electron || __dirname.includes('app.asar')) {
+    try {
+      assertBackupEdition(config);
+    } catch (error) {
+      logger.error(`Backup blocked by Starter edition: ${error.message}`);
+      throw error;
+    }
+  }
 
   const forceNewRepository = argv.includes('--force-new-repository');
   const repoStatePath = path.join(configPathManager.dataDir, 'repo-state.json');

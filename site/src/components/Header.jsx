@@ -32,8 +32,8 @@ export default function Header() {
         </nav>
 
         <div className="header-cta">
-          <a className="btn btn-primary btn-sm" href="#contact">
-            Request access
+          <a className="btn btn-primary btn-sm" href="#download">
+            Download
           </a>
           <button
             className="nav-toggle"

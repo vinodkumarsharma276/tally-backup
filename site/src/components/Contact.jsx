@@ -147,6 +147,7 @@ export default function Contact() {
           </Reveal>
 
           <div className="contact-info">
+            {company.showRegisteredOffice && (
             <Reveal className="info-card" delay={60}>
               <h3>Registered office</h3>
               <address>
@@ -168,6 +169,7 @@ export default function Contact() {
               </address>
             </Reveal>
 
+            )}
             <Reveal className="info-card" delay={120}>
               <h3>Email us</h3>
               <p>

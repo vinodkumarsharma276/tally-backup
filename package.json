@@ -138,6 +138,7 @@
     },
     "files": [
       "desktop/**/*",
+      "shared/edition.json",
       "build/icon.png",
       "build/icon.ico",
       "assets/branding/tray-*.png",
@@ -157,7 +158,7 @@
         "nsis"
       ],
       "icon": "build/icon.ico",
-      "artifactName": "Backup-Genie-Setup-${version}.${ext}"
+      "artifactName": "Backup-Genie-Starter-Setup.${ext}"
     },
     "mac": {
       "icon": "build/icon.icns"

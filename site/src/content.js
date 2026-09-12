@@ -13,8 +13,9 @@ export const company = {
     lines: ['[Business address line 1]', '[Business address line 2]', '[City, State, PIN]'],
     country: 'India',
   },
-  email: 'hello@backupgenie.app',
-  support: 'support@backupgenie.app',
+  email: 'contact@udgamai.com',
+  support: 'contact@udgamai.com',
+  showRegisteredOffice: false,
   phone: '',
   // TODO: replace with the registered entity details before launch.
   legalName: 'Udgam AI',
@@ -24,11 +25,12 @@ export const company = {
 export const product = {
   name: 'Backup Genie',
   version: 'v0.0.1',
-  versionLabel: 'Early access',
+  versionLabel: 'Starter · Early access',
   headline: 'Any folder. Any day. Back in one click.',
   subhead:
     'Backup Genie takes automatic, versioned, off-site backups of any folder on your machine — documents, accounts, design files, databases, project archives — deduplicated so only what changed is uploaded, and restorable to any past day.',
-  downloadUrl: 'https://github.com/vinodkumarsharma276/tally-backup/releases/latest',
+  downloadUrl: 'https://github.com/vinodkumarsharma276/tally-backup/releases/latest/download/Backup-Genie-Starter-Setup.exe',
+  releaseApiUrl: 'https://api.github.com/repos/vinodkumarsharma276/tally-backup/releases/latest',
   docsUrl: 'https://github.com/vinodkumarsharma276/tally-backup#readme',
   repoUrl: 'https://github.com/vinodkumarsharma276/tally-backup',
 };
@@ -37,7 +39,7 @@ export const stats = [
   { value: 60, suffix: 's', label: 'Typical time to first backup' },
   { value: 90, suffix: '%', label: 'Less uploaded after day one, thanks to dedup' },
   { value: 30, suffix: '+', label: 'Restore points kept by default' },
-  { value: 5, suffix: '', label: 'Storage targets supported' },
+  { value: 1, suffix: '', label: 'Google Drive profile in Starter' },
 ];
 
 export const features = [
@@ -61,9 +63,9 @@ export const features = [
   },
   {
     icon: '☁️',
-    title: 'Your storage or ours',
+    title: 'Your own Google Drive',
     body:
-      'Bring your own Google Drive, Amazon S3, Azure Blob, NAS or local disk — or use our managed, encrypted cloud and skip the setup entirely. Send one folder to several places at once.',
+      'Starter connects to one Google Drive storage profile. Back up multiple source folders to that destination. Other storage providers and extra destinations are not included in this edition.',
   },
   {
     icon: '📅',
@@ -83,12 +85,12 @@ export const steps = [
   {
     n: '01',
     title: 'Install',
-    body: 'One signed installer for Windows. No scripts, no command line, no cloud console.',
+    body: 'Download the Windows Starter installer and run setup. No scripts or command line needed.',
   },
   {
     n: '02',
     title: 'Pick your folders',
-    body: 'Add any folders worth keeping and choose where the copies should go. Several sources, several destinations.',
+    body: 'Connect your Google Drive and add the folders worth keeping. All sources use your one Drive destination.',
   },
   {
     n: '03',
@@ -122,8 +124,14 @@ export const roadmap = [
   {
     status: 'live',
     label: 'In v0.0.1',
-    title: 'Multi-source, multi-destination',
-    body: 'Many source folders to Google Drive, Amazon S3, Azure Blob, network shares and local disks — several at once.',
+    title: 'Multiple sources, one Google Drive',
+    body: 'Starter protects multiple folders using one Google Drive profile. Restore points and scheduling remain available.',
+  },
+  {
+    status: 'planned',
+    label: 'Not in Starter',
+    title: 'More providers and destinations',
+    body: 'S3, Azure Blob, NAS, local storage and multiple destinations are reserved for future editions. Availability and pricing are not yet announced.',
   },
   {
     status: 'next',
@@ -203,7 +211,7 @@ export const audiences = [
   },
   {
     title: 'Multi-branch operations',
-    body: 'Several machines, several destinations, one consistent restore story across all of them.',
+    body: 'Protect folders on each machine with its own Starter installation and one Google Drive profile.',
   },
   {
     title: 'Anyone with irreplaceable files',
@@ -223,7 +231,7 @@ export const faqs = [
   },
   {
     q: 'Where exactly does my data go?',
-    a: 'Wherever you choose. Backup Genie supports your own Google Drive, Amazon S3, Azure Blob, a NAS or network share, and plain local or external disks. You can send the same source folder to more than one destination.',
+    a: 'The Starter download backs up to your own Google Drive, using one storage profile per installation. Multiple source folders can share that profile. Other providers and multiple backup destinations are not included.',
   },
   {
     q: 'How much storage will it use?',
@@ -235,15 +243,16 @@ export const faqs = [
   },
   {
     q: 'What is in v0.0.1 versus the roadmap?',
-    a: 'v0.0.1 ships the backup, restore, scheduling, multi-source, multi-destination and reporting engine. Accounts (SISU), data hiding and access control are on the roadmap and are marked as such above — we do not sell what is not built yet.',
+    a: 'Starter includes versioned backup and restore, scheduling, multiple source folders and one Google Drive profile. Company email reports require a provisioned account and licence key. Extra storage providers, SISU, data hiding and access control are not included.',
   },
   {
     q: 'Can I try it before paying?',
-    a: 'Yes. Early access builds are free to evaluate on your own storage. Tell us about your setup through the form below and we will send you a build and a walkthrough.',
+    a: 'Yes. Download the Starter edition for Windows and connect your Google Drive. You can install it yourself; contact us for help or to activate company email reporting. No payment is required for this early-access evaluation.',
   },
 ];
 
 export const nav = [
+  { href: '#download', label: 'Download' },
   { href: '#features', label: 'Features' },
   { href: '#how', label: 'How it works' },
   { href: '#roadmap', label: 'Roadmap' },
