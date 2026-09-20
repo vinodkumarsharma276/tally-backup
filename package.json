@@ -70,8 +70,8 @@
     "cli"
   ],
   "author": {
-    "name": "Vinod Sharma",
-    "email": "your-email@example.com"
+    "name": "Udgam AI",
+    "email": "contact@udgamai.com"
   },
   "license": "MIT",
   "homepage": "https://github.com/your-username/tally-backup-pro",
@@ -170,7 +170,7 @@
       ],
       "icon": "build/icon.png",
       "category": "Utility",
-      "maintainer": "Backup Genie <support@backupgenie.app>",
+      "maintainer": "Udgam AI <contact@udgamai.com>",
       "synopsis": "Automated, versioned backups for your data",
       "artifactName": "Backup-Genie-${version}.${ext}"
     },
