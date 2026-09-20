@@ -146,6 +146,18 @@ async function loadConfig() {
   return fs.readJson(target);
 }
 
+// True when an OAuth client (bundled file, env override or a stored per-customer
+// credentials file) can actually be resolved. Without one, every Google flow in
+// the app fails, so features that depend on it are hidden rather than offered.
+async function hasOAuthClient(config) {
+  try {
+    await new GoogleDriveService(config.googleDrive || {}).loadCredentials();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function loadConfigForRenderer() {
   const sanitized = await sanitizeConfigForRenderer(await loadConfig());
   // Profiles with a recorded repository are in use; the UI locks their provider.
@@ -1024,7 +1036,14 @@ function registerIpc() {
   ipcMain.handle('session:get', async () => {
     const config = await loadConfig();
     const serviceUrl = config.account?.controlPlaneUrl || config.email?.relay?.controlPlaneUrl || '';
-    return { ...(await readSession()), serviceUrl, signInAvailable: !!serviceUrl };
+    // Sign-in also needs an OAuth client. A build made without one (the client
+    // file is git-ignored and injected at release time) would otherwise offer a
+    // button that can only fail, so the welcome screen is skipped instead.
+    return {
+      ...(await readSession()),
+      serviceUrl,
+      signInAvailable: !!serviceUrl && (await hasOAuthClient(config)),
+    };
   });
   ipcMain.handle('session:sign-out', async () => {
     appendDesktopLog('Signed out of Backup Genie account.');
