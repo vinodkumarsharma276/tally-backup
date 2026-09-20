@@ -38,7 +38,9 @@ git push origin v0.1.2
 Watch progress under the repo's **Actions** tab. When it finishes, the release
 appears under **Releases** with:
 
-- `Backup-Genie-Setup-<version>.exe` + `latest.yml` (Windows)
+- `Backup-Genie-Starter-Setup.exe` + `latest.yml` (Windows) — the name is fixed by
+  `build.win.artifactName` in `package.json` and carries no version, so the site can link
+  a stable download URL
 - `Backup-Genie-<version>.AppImage` + `Backup-Genie-<version>.deb` + `latest-linux.yml` (Linux)
 - `.blockmap` files (for smaller delta updates)
 
@@ -51,7 +53,7 @@ appears under **Releases** with:
 
 ## Installing (for testers / customers)
 
-- **Windows** → run `Backup-Genie-Setup-<version>.exe`. Unsigned builds show a
+- **Windows** → run `Backup-Genie-Starter-Setup.exe`. Unsigned builds show a
   SmartScreen warning: **More info → Run anyway** (until a code-signing cert is added).
 - **Linux** → run the `.AppImage` (mark executable), or `sudo apt install ./Backup-Genie-<version>.deb`.
 
