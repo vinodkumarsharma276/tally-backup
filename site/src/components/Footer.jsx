@@ -56,7 +56,7 @@ export default function Footer() {
                 <a href={product.repoUrl} target="_blank" rel="noreferrer noopener">
                   Release notes
                 </a>
-                <a href="#roadmap">Roadmap</a>
+                <a href="#scope">What you get</a>
                 <a href="#faq">FAQ</a>
               </div>
             </div>

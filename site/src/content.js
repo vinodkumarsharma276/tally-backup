@@ -1,6 +1,6 @@
 /**
  * Single source of truth for every word, link and number on the marketing site.
- * Edit this file (not the components) to update copy, address or roadmap status.
+ * Edit this file (not the components) to update copy, address or edition scope.
  */
 
 export const company = {
@@ -108,77 +108,25 @@ export const steps = [
 ];
 
 /**
- * status: 'live' shows a green "Available now" chip; everything else renders as
- * a roadmap card with the given label.
+ * What the Starter edition does and does not cover. This is a scope boundary
+ * for buyers, not a feature pipeline — keep it short, and never list unbuilt
+ * features or internal project names here.
  */
-export const roadmap = [
-  {
-    status: 'live',
-    label: 'In v0.0.2',
-    title: 'Versioned backup & restore engine',
-    body: 'Incremental, deduplicated snapshots of any folder, with point-in-time restore, verification and retention.',
-  },
-  {
-    status: 'live',
-    label: 'In v0.0.2',
-    title: 'Scheduling, tray app & email reports',
-    body: 'Background scheduler, desktop notifications and per-run report emails from our servers.',
-  },
-  {
-    status: 'live',
-    label: 'In v0.0.2',
-    title: 'Multiple sources, one Google Drive',
-    body: 'Starter protects multiple folders using one Google Drive profile. Restore points and scheduling remain available.',
-  },
-  {
-    status: 'planned',
-    label: 'Not in Starter',
-    title: 'More providers and destinations',
-    body: 'S3, Azure Blob, NAS, local storage and multiple destinations are reserved for future editions. Availability and pricing are not yet announced.',
-  },
-  {
-    status: 'next',
-    label: 'Next up',
-    title: 'SISU — Sign-in & Sign-up accounts',
-    body:
-      'A Backup Genie account that follows you across machines: sign up once, sign in anywhere, and carry your profiles, schedules and restore history with you.',
-  },
-  {
-    status: 'next',
-    label: 'Next up',
-    title: 'Data hiding',
-    body:
-      'Keep sensitive folders invisible to everyone but the people you name — hidden from casual browsing on the machine and unreadable in the backup store.',
-  },
-  {
-    status: 'planned',
-    label: 'Planned',
-    title: 'Access control & roles',
-    body:
-      'Owner, operator and viewer roles so a staff member can run a backup without being able to change destinations, delete snapshots or restore data.',
-  },
-  {
-    status: 'planned',
-    label: 'Planned',
-    title: 'Managed cloud tier',
-    body:
-      'Encrypted, metered storage we host and operate. No Drive quota, no S3 console — just a plan and a usage meter.',
-  },
-  {
-    status: 'planned',
-    label: 'Planned',
-    title: 'macOS & Linux builds',
-    body:
-      'The engine already runs cross-platform. Native installers and tray apps for macOS and Linux follow the Windows release.',
-  },
-  {
-    status: 'exploring',
-    label: 'Exploring',
-    title: 'Fleet dashboard for teams',
-    body:
-      'One web view for firms and IT teams managing many machines: last run, health, quota and alerts across every device.',
-  },
-];
+export const scope = {
+  included: [
+    'Versioned backup and point-in-time restore for any number of source folders',
+    'Incremental, deduplicated uploads — only the chunks that changed leave the machine',
+    'Scheduling, tray app and an email report after every run',
+    'One Google Drive storage profile, with credentials held in the OS vault',
+  ],
+  excluded: [
+    'Other storage providers — S3, Azure Blob, NAS and local storage',
+    'More than one backup destination',
+    'Managed cloud storage hosted by us',
+    'Staff roles and per-folder access control',
+    'macOS and Linux builds',
+  ],
+};
 
 export const useCases = [
   { icon: '📒', label: 'Accounting data (Tally, Busy, Zoho)' },
@@ -245,8 +193,8 @@ export const faqs = [
     a: 'Transfers are TLS-protected and storage credentials are kept in the operating system credential vault rather than in config files. The managed tier adds encryption at rest and tenant isolation.',
   },
   {
-    q: 'What is in v0.0.2 versus the roadmap?',
-    a: 'Starter includes versioned backup and restore, scheduling, multiple source folders and one Google Drive profile. Company email reports require a provisioned account and licence key. Extra storage providers, SISU, data hiding and access control are not included.',
+    q: 'What exactly is in the Starter edition?',
+    a: 'Starter includes versioned backup and restore, scheduling, multiple source folders and one Google Drive profile. Company email reports require a provisioned account and licence key. Other storage providers, extra destinations, staff access control and macOS or Linux builds are not included.',
   },
   {
     q: 'Can I try it before paying?',
@@ -260,7 +208,7 @@ export const nav = [
   ...(product.downloadsEnabled ? [{ href: '#download', label: 'Download' }] : []),
   { href: '#features', label: 'Features' },
   { href: '#how', label: 'How it works' },
-  { href: '#roadmap', label: 'Roadmap' },
+  { href: '#scope', label: 'What you get' },
   { href: '#faq', label: 'FAQ' },
   { href: '#contact', label: 'Contact' },
 ];
