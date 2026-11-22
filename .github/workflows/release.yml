@@ -54,8 +54,13 @@ jobs:
           # `main` allows no direct pushes and has no human bypass. The ruleset
           # grants bypass to deploy keys only, so the version bump is pushed over
           # SSH using the RELEASE_SSH_KEY secret (private half of the repo's
-          # write-enabled deploy key). Without it, releases must be tagged by hand.
-          ssh-key: ${{ secrets.RELEASE_SSH_KEY }}
+          # write-enabled deploy key).
+          #
+          # Only the workflow_dispatch path pushes anything. A tag push just reads
+          # the commit it was given, so it uses the ordinary token — otherwise a
+          # missing or unregistered deploy key breaks the by-hand release route
+          # that exists precisely for when the key is broken.
+          ssh-key: ${{ github.event_name == 'workflow_dispatch' && secrets.RELEASE_SSH_KEY || '' }}
 
       - name: Resolve version and create tag
         id: resolve
