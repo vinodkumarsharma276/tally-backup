@@ -78,9 +78,14 @@ class GoogleDriveService {
             };
         }
 
+        // Nothing to fall back on: this build shipped without an OAuth client, so
+        // no Google flow can work until one is supplied. Say that plainly rather
+        // than pointing at a button that would fail the same way.
         throw new Error(
-            'No Google credentials available. Use "Connect Google" in the app to sign in, ' +
-            'or provide an OAuth client credentials file.'
+            'This build has no Google OAuth client, so Google sign-in and Drive access are ' +
+            'unavailable. Official installers ship with one; a locally built installer needs ' +
+            'config/google-oauth-client.json (see config/google-oauth-client.example.json) or ' +
+            'the TALLY_GOOGLE_CLIENT_ID / TALLY_GOOGLE_CLIENT_SECRET environment variables.'
         );
     }
 

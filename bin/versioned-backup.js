@@ -67,6 +67,30 @@ function destinationsOf(source) {
   return [source.storageProfile];
 }
 
+// Retention and compaction are housekeeping that runs after the snapshot is
+// already committed. A failure there costs disk space, not data, so it must not
+// turn a successful backup into a reported failure — the customer would believe
+// their files were never uploaded. It is still surfaced loudly.
+async function collectGarbageSafely(engine, keepDays, sourceName, storageLabel) {
+  try {
+    return await engine.gc({ keepDays });
+  } catch (error) {
+    logger.warn(
+      `Backup of '${sourceName}' succeeded, but housekeeping on '${storageLabel}' did not finish: ` +
+        `${error.message}. The restore point is safe; old data may not have been cleaned up yet.`
+    );
+    emitMachineEvent('anomaly', {
+      type: 'gc-failed',
+      sourceName,
+      storageLabel,
+      message: error.message,
+    });
+    // keptSnapshots stays 0 so the repository-reset heuristic below, which needs
+    // a trustworthy snapshot count, sits this run out instead of guessing.
+    return { keepDays, keptSnapshots: 0, deletedSnapshots: 0, deletedChunks: 0, failed: error.message };
+  }
+}
+
 // Plain folder-to-folder copy. Only local destinations make sense here: the
 // point is a copy the customer can open directly.
 async function runMirrorSource(config, source, overall) {
@@ -317,7 +341,7 @@ async function main(argv = process.argv.slice(2)) {
       });
       primaryStats = stats;
       finishProgress();
-      const gc = await engine.gc({ keepDays: keepDaysFor(destination) });
+      const gc = await collectGarbageSafely(engine, keepDaysFor(destination), source.name, storageLabel);
 
       // An established repository re-uploading nearly everything usually means the
       // destination lost its data even though the marker survived.
@@ -454,7 +478,12 @@ async function main(argv = process.argv.slice(2)) {
           snapshotStore: new SnapshotStore(mirrorBackend),
           logger,
         });
-        const mirrorGc = await mirrorEngine.gc({ keepDays: keepDaysFor(primaryDestination) });
+        const mirrorGc = await collectGarbageSafely(
+          mirrorEngine,
+          keepDaysFor(primaryDestination),
+          configuredSource.name,
+          destination
+        );
 
         const mirrorAccount = mirrorBackend.accountEmail ? await mirrorBackend.accountEmail() : null;
         const mirrorLink = mirrorBackend.rootFolderId

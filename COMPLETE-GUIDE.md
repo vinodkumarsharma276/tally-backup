@@ -1,616 +1,310 @@
-# Tally Backup Pro - Complete Installation & Setup Guide
-
-## Table of Contents
-1. [System Requirements](#system-requirements)
-2. [Installation](#installation)
-3. [Initial Setup](#initial-setup)
-4. [Scheduling Backups](#scheduling-backups)
-5. [Google Drive Authentication](#google-drive-authentication)
-6. [Configuration](#configuration)
-7. [Usage](#usage)
-8. [Troubleshooting](#troubleshooting)
-9. [Advanced Features](#advanced-features)
-
-## System Requirements
-
-- **Operating System**: Windows 10/11, Linux, or macOS
-- **Node.js**: Version 14.0.0 or higher
-- **npm**: Comes with Node.js
-- **Internet Connection**: Required for Google Drive sync
-- **Google Account**: For backup storage
-
-## Installation
-
-### Windows Installation (Recommended)
-
-1. **Download Files**:
-   - `tally-backup-pro-1.0.0-obfuscated.tgz`
-   - `install-tally-backup.bat`
-
-2. **Place in Downloads Folder**:
-   ```
-   C:\Users\[Username]\Downloads\
-   ├── tally-backup-pro-1.0.0-obfuscated.tgz
-   └── install-tally-backup.bat
-   ```
-
-3. **Run Installation**:
-   - Navigate to Downloads folder
-   - Run `install-tally-backup.bat`
-   - Follow the on-screen instructions
-
-4. **Installation Location**:
-   ```
-   C:\Users\[Username]\Documents\TallyBackupApp\
-   ```
-
-### Alternative Installation Methods
-
-#### Global npm Installation
-```bash
-npm install -g tally-backup-pro-1.0.0-obfuscated.tgz
-```
-
-#### Local npm Installation
-```bash
-mkdir TallyBackupApp
-cd TallyBackupApp
-npm install path/to/tally-backup-pro-1.0.0-obfuscated.tgz
-```
-
-#### Docker Installation
-```bash
-docker-compose up -d
-```
-
-## Initial Setup
-
-### 1. Initialize Configuration
-```bash
-npx tally-backup init
-```
-
-### 2. Setup Google Drive Authentication
-```bash
-npx tally-backup setup-auth
-```
-
-### 3. Run Initial Backup Test
-```bash
-npx tally-backup backup
-```
-
-### 4. Verify Status
-```bash
-npx tally-backup status
-```
-
-## Scheduling Backups
-
-### Option 1: Windows Task Scheduler (Recommended)
-
-**Setup**:
-```bash
-# From TallyBackupApp directory
-setup-task-scheduler.bat
-```
-
-**Features**:
-- Runs automatically even after system restart
-- Daily backup at 9:00 PM
-- Comprehensive logging
-- Easy management through Windows Task Scheduler
-
-**Management**:
-```bash
-# View task
-schtasks /query /tn "Tally Backup Pro - Daily Backup"
-
-# Delete task
-schtasks /delete /tn "Tally Backup Pro - Daily Backup" /f
-
-# Run manually
-schtasks /run /tn "Tally Backup Pro - Daily Backup"
-```
-
-### Option 2: Node.js Scheduler
-
-**Setup**:
-```bash
-npx tally-backup schedule --time 21:00
-```
-
-**Run**:
-```bash
-node scheduler.js
-```
-
-**Background Execution**:
-```bash
-# Windows
-start /b node scheduler.js
-
-# Linux/macOS
-node scheduler.js &
-```
-
-### Option 3: Windows Service
-
-**Install**:
-```bash
-npx tally-backup install-service
-```
-
-**Manage**:
-```bash
-# Start service
-net start TallyBackupService
-
-# Stop service
-net stop TallyBackupService
-
-# Uninstall service
-npx tally-backup uninstall-service
-```
-
-## Google Drive Authentication
-
-### Initial Setup
-
-1. **Run Setup Command**:
-   ```bash
-   npx tally-backup setup-auth
-   ```
-
-2. **Follow Browser Instructions**:
-   - Browser will open automatically
-   - Login to your Google account
-   - Grant permissions to Tally Backup Pro
-   - Return to terminal when complete
-
-3. **Verify Authentication**:
-   ```bash
-   npx tally-backup status
-   ```
-
-### Troubleshooting Authentication
-
-#### Token Expired
-```bash
-# Re-authenticate
-npx tally-backup setup-auth
-
-# Or delete and recreate
-rm config/token.json
-npx tally-backup setup-auth
-```
-
-#### Permission Issues
-- Ensure Google Drive API is enabled
-- Check quota limits in Google Cloud Console
-- Verify OAuth consent screen configuration
-
-#### Network Issues
-- Check firewall settings
-- Verify proxy configuration
-- Ensure outbound HTTPS (443) is allowed
-
-## Configuration
-
-### Configuration Files
-
-#### `config/config.json`
-```json
-{
-  "sources": [
-    {
-      "name": "Tally Data",
-      "path": "C:\\Users\\[Username]\\Documents\\Tally",
-      "enabled": true
-    }
-  ],
-  "destinations": [
-    {
-      "name": "Customer-Data",
-      "path": "C:\\Users\\[Username]\\Documents\\Customer-Data",
-      "enabled": true
-    }
-  ],
-  "email": {
-    "enabled": false,
-    "smtp": {
-      "host": "smtp.gmail.com",
-      "port": 587,
-      "secure": false
-    }
-  },
-  "schedule": {
-    "enabled": true,
-    "time": "21:00",
-    "frequency": "daily"
-  }
-}
-```
-
-#### `config/credentials.json`
-```json
-{
-  "installed": {
-    "client_id": "your-client-id",
-    "client_secret": "your-client-secret",
-    "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"]
-  }
-}
-```
-
-### Email Notifications
-
-#### Setup Email
-```bash
-npx tally-backup setup-email
-```
-
-#### Test Email
-```bash
-npx tally-backup test-email
-```
-
-#### Email Configuration
-```json
-{
-  "email": {
-    "enabled": true,
-    "smtp": {
-      "host": "smtp.gmail.com",
-      "port": 587,
-      "secure": false,
-      "auth": {
-        "user": "your-email@gmail.com",
-        "pass": "your-app-password"
-      }
-    },
-    "from": "your-email@gmail.com",
-    "to": ["admin@company.com", "backup-alerts@company.com"],
-    "notifications": {
-      "success": true,
-      "failure": true,
-      "summary": true
-    }
-  }
-}
-```
-
-## Usage
-
-### Manual Operations
-
-#### Run Backup
-```bash
-npx tally-backup backup
-```
-
-#### Restore Data
-```bash
-# Restore to default location
-npx tally-backup restore
-
-# Restore to specific location
-npx tally-backup restore "C:\RestoreLocation"
-```
-
-#### Check Status
-```bash
-npx tally-backup status
-```
-
-#### View Help
-```bash
-npx tally-backup --help
-```
-
-### Log Files
-
-#### Application Logs
-```
-TallyBackupApp/logs/
-├── app.log              # General application logs
-├── backup.log           # Backup operation logs
-├── error.log            # Error logs
-└── scheduled-backup.log # Scheduled task logs
-```
-
-#### View Recent Logs
-```bash
-# Windows
-type logs\app.log
-type logs\backup.log
-
-# Linux/macOS
-cat logs/app.log
-tail -f logs/backup.log
-```
-
-## Troubleshooting
-
-### Common Issues
-
-#### Installation Problems
-
-**Node.js Not Found**:
-- Download and install Node.js from https://nodejs.org/
-- Restart command prompt after installation
-- Verify with `node --version`
-
-**Permission Denied**:
-- Run command prompt as administrator
-- Check folder permissions
-- Ensure antivirus isn't blocking installation
-
-#### Backup Failures
-
-**Google Drive Connection Failed**:
-```bash
-# Re-authenticate
-npx tally-backup setup-auth
-
-# Check network connectivity
-ping drive.googleapis.com
-```
-
-**File Access Denied**:
-- Ensure Tally software is closed
-- Check file permissions
-- Run as administrator if needed
-
-**Insufficient Storage**:
-- Check Google Drive storage quota
-- Clean up old backup files
-- Consider upgrading Google Drive plan
-
-#### Scheduling Issues
-
-**Task Not Running**:
-- Check if task is enabled in Task Scheduler
-- Verify user account has proper permissions
-- Check system time and timezone
-
-**Backup Fails When Scheduled**:
-- Ensure paths are absolute (not relative)
-- Check if user is logged in (for Interactive tasks)
-- Review scheduled task logs
-
-### Advanced Troubleshooting
-
-#### Enable Debug Logging
-```bash
-# Set environment variable
-set DEBUG=tally-backup:*
-
-# Run with verbose output
-npx tally-backup backup --verbose
-```
-
-#### Clear Cache and Reset
-```bash
-# Remove all local state
-rm -rf data/
-rm config/token.json
-
-# Reinitialize
-npx tally-backup init
-npx tally-backup setup-auth
-```
-
-#### Check System Resources
-```bash
-# Check disk space
-dir C: /-c
-
-# Check memory usage
-tasklist /fi "imagename eq node.exe"
-
-# Check network connectivity
-telnet smtp.gmail.com 587
-```
-
-## Advanced Features
-
-### Cloud-First Architecture
-
-Tally Backup Pro uses a cloud-first approach:
-- Always downloads fresh state from Google Drive before backup
-- Never trusts local cache for backup decisions
-- Automatically cleans up local state after backup
-- Ensures consistency across multiple installations
-
-### Deduplication
-
-- Automatic file deduplication based on content hash
-- Reduces storage usage significantly
-- Maintains file integrity while optimizing space
-- Works across multiple backup sources
-
-### Incremental Backups
-
-- Only backs up changed files
-- Compares file checksums and timestamps
-- Handles file moves and renames efficiently
-- Maintains complete backup history
-
-### Multi-Source Support
-
-```json
-{
-  "sources": [
-    {
-      "name": "Tally Data",
-      "path": "C:\\Tally",
-      "enabled": true
-    },
-    {
-      "name": "Documents",
-      "path": "C:\\Documents",
-      "enabled": true
-    }
-  ]
-}
-```
-
-### Custom Scheduling
-
-```bash
-# Daily at specific time
-npx tally-backup schedule --time 14:30
-
-# Weekly backups
-npx tally-backup schedule --time 22:00 --frequency weekly
-
-# Custom cron expression
-npx tally-backup schedule --cron "0 */6 * * *"  # Every 6 hours
-```
-
-### Service Installation
-
-#### Windows Service
-```bash
-# Install
-npx tally-backup install-service
-
-# Configure
-sc config TallyBackupService start= auto
-
-# Monitor
-sc query TallyBackupService
-```
-
-#### Linux Systemd Service
-```bash
-# Install
-sudo npx tally-backup install-service
-
-# Enable auto-start
-sudo systemctl enable tally-backup
-
-# Monitor
-systemctl status tally-backup
-```
-
-#### Docker Deployment
-
-##### Docker Compose
-```yaml
-version: '3.8'
-services:
-  tally-backup:
-    build: .
-    volumes:
-      - ./config:/app/config
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - /path/to/tally/data:/data/source
-    environment:
-      - NODE_ENV=production
-      - BACKUP_SCHEDULE=0 21 * * *
-    restart: unless-stopped
-```
-
-##### Environment Variables
-```bash
-# Backup schedule
-BACKUP_SCHEDULE=0 21 * * *
-
-# Log level
-LOG_LEVEL=info
-
-# Google Drive settings
-GDRIVE_FOLDER_NAME=TallyBackup
-
-# Email settings
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-```
-
-### Monitoring and Alerts
-
-#### Health Checks
-```bash
-# Check service health
-npx tally-backup status --health
-
-# Detailed diagnostics
-npx tally-backup status --verbose
-```
-
-#### Custom Monitoring
-```javascript
-// monitor.js
-const { exec } = require('child_process');
-
-setInterval(() => {
-  exec('npx tally-backup status --json', (error, stdout) => {
-    const status = JSON.parse(stdout);
-    if (!status.healthy) {
-      // Send alert
-      console.log('Backup service unhealthy!');
-    }
-  });
-}, 300000); // Check every 5 minutes
-```
+# Backup Genie — Complete Guide
+
+Everything needed to install, configure, run and restore Backup Genie.
+
+1. [System requirements](#system-requirements)
+2. [Installing](#installing)
+3. [First run](#first-run)
+4. [Storage](#storage)
+5. [Sources](#sources)
+6. [Scheduling](#scheduling)
+7. [Restoring](#restoring)
+8. [Email reports](#email-reports)
+9. [Where your files live](#where-your-files-live)
+10. [Configuration reference](#configuration-reference)
+11. [Troubleshooting](#troubleshooting)
+12. [Command line](#command-line)
 
 ---
 
-## Support
+## System requirements
 
-For additional support:
-- Check logs in `TallyBackupApp/logs/`
-- Review configuration in `TallyBackupApp/config/`
-- Run diagnostics with `npx tally-backup status --verbose`
+- **Windows 10 or 11** (primary). Linux `.AppImage` and `.deb` builds are published
+  alongside each release; macOS is on the roadmap.
+- **Internet connection** for off-site storage and email reports.
+- **A Google account** with enough Drive space for your data. Backup Genie only ever
+  touches the folder it creates — the `drive.file` scope means it cannot see the rest of
+  your Drive.
+- No Node.js install required. Everything is bundled in the installer.
 
-## Version Information
+## Installing
 
-**Current Version**: 1.0.0
-**Node.js Requirement**: >= 14.0.0
-**Supported Platforms**: Windows 10/11, Linux, macOS
+Download the installer from the
+[Releases page](https://github.com/vinodkumarsharma276/tally-backup/releases/latest) and
+run it.
 
-## Windows-Specific Configuration
+- **Windows** — `Backup-Genie-Starter-Setup.exe`. You can choose the install location.
+  Desktop and Start Menu shortcuts are created. Because the build is not yet
+  code-signed, SmartScreen shows a warning: **More info → Run anyway**.
+- **Linux** — mark the `.AppImage` executable and run it, or
+  `sudo apt install ./Backup-Genie-<version>.deb`.
 
-### Default Installation Paths
+The app registers itself to start with Windows and runs from the notification area, so
+scheduled backups keep working after a reboot. Updates are checked automatically and
+installed from the same release feed.
 
-After installation, files are located at:
-- **Application**: `C:\Users\[Username]\Documents\TallyBackupApp\`
-- **Configuration**: `C:\Users\[Username]\Documents\TallyBackupApp\config\`
-- **Logs**: `C:\Users\[Username]\Documents\TallyBackupApp\logs\`
-- **Data**: `C:\Users\[Username]\Documents\TallyBackupApp\data\`
+### Upgrading from the old "Tally Backup" install
 
-### Windows Task Scheduler Setup
+Nothing to do. On first start the app moves `Documents\TallyBackupApp\` to
+`Documents\BackupGenie\`, keeping your settings, history and local state. If a file is
+locked at that moment the old folder is left in place and a fresh one is created — the
+app never fails to start because of this.
 
-For robust scheduling on Windows, use the Task Scheduler:
+## First run
 
-1. **Run Setup Script**:
-   ```cmd
-   # From installation directory
-   setup-task-scheduler.bat
-   ```
+The app opens on **Overview**. Work down the sidebar:
 
-2. **Manual Task Scheduler Setup**:
-   - Open Task Scheduler (`taskschd.msc`)
-   - Create Basic Task
-   - Set trigger (Daily at 8:00 PM)
-   - Set action: Start a program
-   - Program: `node`
-   - Arguments: `bin/tally-backup.js backup`
-   - Start in: `C:\Users\[Username]\Documents\TallyBackupApp`
+1. **Storage** — connect where backups go.
+2. **Sources** — pick the folders to protect.
+3. **Settings** — email reports, schedule defaults, startup behaviour.
+4. **Overview → Back up now** — run the first backup and watch it.
 
-### Common Windows Paths
+The first run uploads everything; it is the slow one. Every run after that uploads only
+the chunks that changed, which is usually a small fraction.
 
-Typical Tally data locations:
-- **Tally 9**: `C:\Tally9\Data\`
-- **TallyPrime**: `C:\Users\[Username]\Documents\TallyPrime\`
-- **Custom Installation**: Check your Tally installation directory
+## Storage
 
-### Windows Firewall
+**Storage** page → **Add storage**.
 
-If you encounter connection issues:
-1. Open Windows Defender Firewall
-2. Allow Node.js through firewall
-3. Ensure outbound HTTPS (port 443) is allowed
+### Google Drive
+
+1. Choose **Google Drive** and click **Connect Google**. A browser window opens for
+   consent; the app never sees your password.
+2. Set **Drive folder** — the name of the folder that will hold the backup store. It is
+   created if it does not exist.
+3. **Test connection** writes, reads back and deletes a probe object, so a
+   misconfiguration surfaces here rather than at 8 PM.
+
+Each storage profile remembers which Google account owns it, so report links always point
+at the right account.
+
+The Starter edition allows **one** Google Drive profile. Every backup source uses it.
+
+### Other providers
+
+The engine also ships backends for local folders, network shares (SMB/UNC), Amazon S3 and
+S3-compatible services (Cloudflare R2, Backblaze B2, Wasabi, MinIO), Azure Blob, and the
+managed tier. In Starter these can be used to **restore** data you already have, but not
+as backup destinations.
+
+### What the store looks like
+
+```
+<store root>/
+  objects/          content-addressed chunks, sharded two hex characters deep
+  snapshots/        one manifest per restore point
+  refs.json         the list of restore points and the "latest" pointer
+```
+
+Do not edit, rename or move anything inside the store by hand. The app writes a marker
+file to recognise its own repositories and refuses to write into a folder that looks like
+something else — that guard is what stops it from ever overwriting unrelated data.
+
+## Sources
+
+**Sources** page → **Add source**. Per source:
+
+| Field | Meaning |
+| --- | --- |
+| **Name** | Shown in reports, history and restore lists |
+| **Operation** | **Backup** (local → storage) or **Restore** (storage → local) |
+| **Folders** | One or more folders to protect; each can carry a label |
+| **Storage** | Which storage profile this source uses |
+| **Schedule** | When it runs, per source |
+| **Enabled** | Turn a source off without deleting it; disabled sources are skipped everywhere |
+| **Report recipients** | Optional per-source addresses; falls back to the address in Settings |
+
+Add as many sources as you like. Close the application that writes the data (Tally, your
+database, your design tool) before a run if it keeps files exclusively locked — otherwise
+those files are skipped and reported.
+
+## Scheduling
+
+Each source carries its own schedule. The scheduler lives inside the app, which starts
+with Windows and sits in the notification area.
+
+**Missed runs are caught up.** If the machine was off or asleep when a backup was due, it
+runs when the machine comes back, as long as it is within the grace window (48 hours by
+default). Catch-ups are queued one at a time so several overdue sources cannot all start
+at once.
+
+Hover the tray icon for progress; click it to open the window. Backups run while you are
+logged in. If you need runs while logged out, install the app as a Windows service
+(`npm run install-windows-service` from a source checkout).
+
+## Restoring
+
+**Restore** page:
+
+1. Pick the source.
+2. Pick a restore point. Each one shows its timestamp, file count and size.
+3. Pick a destination folder. **Use an empty folder.**
+4. Run it, then **Open restored folder**.
+
+A restore reassembles the *complete* folder as it stood at that moment — not just the
+files that changed that day — so applications that need their whole data directory
+present will open it normally.
+
+**Safety:** the app refuses to restore into a folder that is a live backup source, unless
+you explicitly force it. This is deliberate: it stops a restore from overwriting the data
+you are protecting.
+
+Test a restore before you need one. A backup you have never restored is a hypothesis, not
+a backup.
+
+## Email reports
+
+**Settings → Email reports.**
+
+- **Company relay (default)** — reports are sent through Backup Genie's own service. You
+  need no mail account, no app password and no SMTP settings.
+- **Your own SMTP** — supply host, port, user and password if you would rather send from
+  your own server. The password goes to the OS credential vault, never to the config file.
+
+**Send test email** confirms the whole path before you rely on it.
+
+Reports carry: operation, restore-point id, files and total size, new versus deduplicated
+chunks, amount actually uploaded, duration, restore points retained, the next scheduled
+run, and a link to the storage folder for every enabled source. Success and failure
+reports can be toggled independently.
+
+## Where your files live
+
+| What | Where |
+| --- | --- |
+| Settings | `Documents\BackupGenie\config\config.json` |
+| Local state | `Documents\BackupGenie\data\` |
+| Logs | `Documents\BackupGenie\logs\` |
+| Scratch space | `Documents\BackupGenie\temp\` |
+| Secrets | The OS credential vault (Windows Credential Manager, via `keytar`) |
+
+Logs rotate daily and are kept for 30 days: `tally-backup-YYYY-MM-DD.log` for everything,
+`error-YYYY-MM-DD.log` for failures only. The **Logs** page tails them inside the app.
+
+**Secrets are never written to `config.json`.** Where a credential would go, the file
+holds a reference such as `secret:config.google.oauth.token`, and the real value lives in
+the OS vault. If you are migrating an old install that had a password in plain text, run
+`node tools/migrate-secrets.js` from a source checkout, then rotate that password.
+
+## Configuration reference
+
+You do not normally edit this file — the app writes it. It is documented because support
+sometimes needs to read it.
+
+```jsonc
+{
+  "desktop": {
+    "autoStart": true,          // start with Windows
+    "minimizeToTray": true,
+    "notifications": true,
+    "schedulerEnabled": true
+  },
+
+  "storageProfiles": {
+    "My Drive": { "type": "google_drive", "rootFolderName": "Backup Genie Store" }
+    // other types: local | network | s3 | azure_blob | managed
+  },
+
+  "backup": {
+    "sources": [
+      {
+        "name": "Accounts",
+        "operation": "backup",       // or "restore"
+        "enabled": true,
+        "sourcePaths": [{ "path": "C:\\Accounts", "label": "" }],
+        "storageProfile": "My Drive",
+        "schedule": "0 20 * * *",    // cron, Asia/Kolkata
+        "restore": {                 // restore-type sources only
+          "mode": "manual",          // or "scheduled"
+          "snapshotId": "latest",
+          "cleanDest": false
+        }
+      }
+    ],
+    "schedule": "0 20 * * *",        // default for sources without their own
+    "concurrency": 8,                // parallel chunk transfers
+    "compressionLevel": 6,
+    "catchUpMissed": true,
+    "catchUpWithinHours": 48
+  },
+
+  "retention": {
+    "keepDailyBackups": 30           // restore points kept; the rest are collected
+  },
+
+  "logging": { "level": "info", "maxFiles": 30, "maxSize": "20m" },
+
+  "email": {
+    "enabled": false,
+    "mode": "company",               // "company" relay, or your own SMTP
+    "to": "",
+    "sendOnSuccess": true,
+    "sendOnFailure": true,
+    "includeStats": true,
+    "includeDriveLink": true
+  }
+}
+```
+
+Raising `concurrency` speeds up a run until the storage provider starts rate-limiting; 8
+is a good default for Google Drive. `keepDailyBackups` is what bounds your storage —
+lowering it frees space at the next garbage collection.
+
+## Troubleshooting
+
+**"Connect Google" does not complete.** The consent window needs a browser and outbound
+HTTPS on port 443. Check a proxy or firewall, then try again. If the account previously
+authorised an older build, remove the app under
+[Google account permissions](https://myaccount.google.com/permissions) and reconnect.
+
+**A backup fails with "storage profile not found".** The source points at a profile that
+was renamed or deleted. Open **Sources**, pick the profile again, and save.
+
+**The app refuses to write to a folder.** It found something there that is not one of its
+own repositories. Point it at an empty folder, or accept the repository from the
+**Storage** page if you are certain it is yours.
+
+**Some files were skipped.** They were locked by another application. Close whatever is
+writing them — the accounting package, the database — and run again.
+
+**Drive quota is full.** Either free space in Drive, or lower `keepDailyBackups` so the
+next garbage-collection pass releases the chunks that older restore points were holding.
+
+**Reports are not arriving.** Use **Send test email** first. If you are on your own SMTP,
+antivirus mail-scanning (Norton in particular) has been known to break TLS on port 587 —
+switch to the company relay to rule it out.
+
+**Scheduled runs are not happening.** Confirm the app is running in the notification area
+and that **start with Windows** is on in Settings. The scheduler runs inside the app; if
+the app is closed, nothing fires.
+
+**Nothing above matches.** Check `Documents\BackupGenie\logs\error-<today>.log` — the
+failure is almost always named there in one line.
+
+## Command line
+
+The desktop app is the supported interface. From a source checkout, the same engine is
+driveable directly for automation and debugging. Config resolves from `--config <path>`,
+then the `TALLY_CONFIG` environment variable, then `config/config_test.json`:
+
+```bash
+node bin/versioned-backup.js --config config/config.json
+node bin/versioned-backup.js --source "Accounts"
+node bin/versioned-restore.js --source "Accounts" --snapshot latest --dest ./restored
+node bin/versioned-restore.js --all --dry-run
+node bin/versioned-verify.js
+node tools/versioned-backup.js verify "<original>" "<restored>"
+```
+
+`--dry-run` reports what a restore would do and writes nothing. `verify` compares two
+folders byte for byte and prints `RESULT: IDENTICAL` when they match.
+
+> The older `tally-backup` CLI (`bin/tally-backup.js`, `index.js`, the `setup-*.js`
+> scripts and `install-tally-backup.bat`) predates the desktop app and the versioned
+> engine. It is kept for the legacy mirror flow and is not the supported path for new
+> installs.
+
+---
+
+**Support** — [contact@udgamai.com](mailto:contact@udgamai.com). Please attach
+`Documents\BackupGenie\logs\error-<date>.log` when reporting a failure.

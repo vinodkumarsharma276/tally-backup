@@ -1,50 +1,21 @@
-# Quick Copilot Context Starter for Tally Backup Pro
+# Starting an AI chat session on this repo
 
-Copy and paste this into a new GitHub Copilot Chat session to quickly establish context:
+This file used to hold a context blob to paste into a new Copilot chat. That is no longer
+necessary — context now lives in files the assistants read on their own.
 
----
+**Point your assistant at these, in order:**
 
-**PROJECT CONTEXT:**
+| File | What it gives you |
+| --- | --- |
+| [.github/copilot-instructions.md](.github/copilot-instructions.md) | The short rules. Copilot loads this automatically |
+| [PROJECT-CONTEXT.md](PROJECT-CONTEXT.md) | Architecture, config schema, invariants, legacy map |
+| [README.md](README.md) | What the product is and how to build it |
+| [plans/restore-ui-gtm-plan.md](plans/restore-ui-gtm-plan.md) | The phased plan the product was built against, with locked decisions |
 
-I'm working on "Tally Backup Pro" - a Node.js application for backing up Tally software data to Google Drive with incremental backup, deduplication, and scheduled execution.
+If a tool cannot read repository files, paste **PROJECT-CONTEXT.md** — it is written to
+stand alone.
 
-**KEY DETAILS:**
-- Production-ready codebase (v1.0.0) with obfuscated release package
-- Technologies: Node.js, Google Drive API, Winston logging, node-cron scheduling
-- Features: Incremental backup, daily log rotation, email notifications, cloud storage
-- Architecture: ConfigPathManager handles dev vs installed paths, singleton logger pattern
-- Installation: Windows batch installer moves config/data/logs to Documents/TallyBackupApp/
-
-**CURRENT STRUCTURE:**
-```
-├── src/TallyBackup.js (main backup logic)
-├── src/utils/ConfigPathManager.js (path resolution)
-├── src/utils/logger.js (daily rotating logs)
-├── config/config.json (sources, schedule, email)
-├── bin/ (CLI utilities)
-└── releases/ (obfuscated distribution package)
-```
-
-**RECENT CHANGES (July 2025):**
-- Major cleanup: removed 25+ obsolete files
-- Daily log rotation with winston-daily-rotate-file
-- Enhanced installation with proper directory management
-- CLI utilities moved to bin/ with fixed require paths
-- Created comprehensive documentation and release package
-
-**WHEN HELPING:**
-- Use ConfigPathManager.getInstance() for all path operations
-- Follow existing error handling patterns with retries
-- Reference config/config.json for backup sources and settings
-- Main entry: index.js, backup logic: src/TallyBackup.js
-- Installed location: Documents/TallyBackupApp/ (not node_modules)
-
----
-
-**QUICK COMMANDS:**
-- Run: `node index.js` or VS Code task "Start Tally Backup Service"
-- Manual backup: `node bin/manual-backup.js`
-- Check status: `node bin/status.js`
-- Restore: `node bin/restore.js`
-
-Now you can ask specific questions about the codebase, features, or help with modifications!
+**The one thing to say in any session:** this repository is named `tally-backup` for
+historical reasons. The product is **Backup Genie**, a general-purpose versioned backup
+application, not a Tally-specific tool. Files still carrying the old branding are legacy
+and should not be extended.
