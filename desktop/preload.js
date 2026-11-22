@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('tallyDesktop', {
   signOut: () => ipcRenderer.invoke('session:sign-out'),
   getGoogleAccount: (profileName) => ipcRenderer.invoke('storage:google-account', profileName),
   getLogs: (limit) => ipcRenderer.invoke('logs:get', limit),
+  listRuns: () => ipcRenderer.invoke('runs:list'),
+  getRunLog: (runId) => ipcRenderer.invoke('runs:log', runId),
   testEmail: () => ipcRenderer.invoke('email:test'),
   openPath: (targetPath) => ipcRenderer.invoke('system:open-path', targetPath),
   getSystemInfo: () => ipcRenderer.invoke('system:info'),

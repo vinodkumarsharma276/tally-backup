@@ -1037,9 +1037,132 @@ function Restore({ config, onRestore, openFolder }) {
   );
 }
 
-function Logs({ logs, refreshLogs, operationLogs }) {
-  const lines = [...logs, ...operationLogs].slice(-400);
-  return <div className="page-stack"><div className="page-title-row"><div><span className="eyebrow">Diagnostics</span><h2>Activity logs</h2><p>Readable operational history for troubleshooting and support.</p></div><Button variant="secondary" onClick={refreshLogs}>Refresh logs</Button></div><section className="log-viewer">{lines.length ? lines.map((line, index) => <div className="log-line" key={`${index}-${line}`}><span>{String(index + 1).padStart(3, '0')}</span><code>{line}</code></div>) : <EmptyState title="No logs yet" text="Run a backup or storage test to see activity here." />}</section></div>;
+const APP_LOG = 'app';
+const RUN_STATUS = {
+  running: { label: 'Running', tone: 'info' },
+  success: { label: 'Succeeded', tone: 'success' },
+  failed: { label: 'Failed', tone: 'warn' },
+  interrupted: { label: 'Interrupted', tone: 'warn' },
+};
+
+function runLabel(run) {
+  const kind = run.type === 'restore' ? 'Restore' : 'Backup';
+  const what = run.sourceName || run.profileName;
+  const state = RUN_STATUS[run.status]?.label || run.status;
+  return `${kind}${what ? ` · ${what}` : ''} — ${displayDate(run.startedAt || run.completedAt)} · ${state}`;
+}
+
+function runDetails(run) {
+  const parts = [run.origin === 'scheduled' ? 'Scheduled' : run.origin === 'tray' ? 'Started from the tray' : 'Manual'];
+  parts.push(`started ${displayDate(run.startedAt)}`);
+  if (run.durationMs) parts.push(`took ${Math.max(1, Math.round(run.durationMs / 1000))}s`);
+  if (Number.isFinite(run.files)) parts.push(`${run.files} files`);
+  if (Number.isFinite(run.bytes) && run.bytes > 0) parts.push(`${bytes(run.bytes)} ${run.type === 'restore' ? 'restored' : 'uploaded'}`);
+  return parts.join(' · ');
+}
+
+function Logs({ logs, refreshLogs, operation, openFolder }) {
+  const [runs, setRuns] = useState([]);
+  const [selected, setSelected] = useState(null); // null follows the newest run
+  const [runLog, setRunLog] = useState({ lines: [], truncated: false, file: null });
+  const viewerRef = useRef(null);
+  const pinnedToBottom = useRef(true);
+
+  const withLogs = runs.filter((run) => run.hasLog);
+  const selectionValid = selected === APP_LOG || withLogs.some((run) => run.runId === selected);
+  const activeId = selectionValid ? selected : withLogs[0]?.runId || APP_LOG;
+  const activeRun = withLogs.find((run) => run.runId === activeId) || null;
+  const running = activeRun?.status === 'running';
+  const hasUnloggedRuns = runs.some((run) => !run.hasLog);
+
+  const refreshRuns = () => api.listRuns().then(setRuns).catch(() => {});
+
+  // A run starting or finishing changes the list.
+  useEffect(() => { refreshRuns(); }, [operation?.runId, operation?.status]);
+
+  useEffect(() => {
+    if (activeId === APP_LOG) return undefined;
+    let cancelled = false;
+    const load = () => api.getRunLog(activeId)
+      .then((result) => { if (!cancelled) setRunLog(result); })
+      .catch(() => {});
+    load();
+    // A running run's file grows while it is open, so follow it. A finished
+    // run is read once more shortly after, to pick up its closing line.
+    const timer = running ? window.setInterval(load, 1500) : window.setTimeout(load, 1200);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.clearTimeout(timer);
+    };
+  }, [activeId, running]);
+
+  const lines = activeId === APP_LOG ? logs : runLog.lines;
+
+  // Stay at the bottom for a live run, unless the reader has scrolled up.
+  useEffect(() => { pinnedToBottom.current = true; }, [activeId]);
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (viewer && pinnedToBottom.current) viewer.scrollTop = viewer.scrollHeight;
+  }, [lines]);
+  const onScroll = (event) => {
+    const el = event.currentTarget;
+    pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
+
+  const refresh = () => {
+    refreshRuns();
+    if (activeId === APP_LOG) refreshLogs();
+    else api.getRunLog(activeId).then(setRunLog).catch(() => {});
+  };
+
+  return (
+    <div className="page-stack">
+      <div className="page-title-row">
+        <div>
+          <span className="eyebrow">Diagnostics</span>
+          <h2>Activity logs</h2>
+          <p>Every backup and restore keeps its own log. Pick a run to see exactly what happened.</p>
+        </div>
+        <Button variant="secondary" onClick={refresh}>Refresh</Button>
+      </div>
+
+      <section className="card run-picker">
+        <SelectField label="Show log for" value={activeId} onChange={(event) => setSelected(event.target.value)}>
+          {withLogs.map((run) => <option key={run.runId} value={run.runId}>{runLabel(run)}</option>)}
+          <option value={APP_LOG}>Application log — all activity today</option>
+        </SelectField>
+        {activeRun && (
+          <div className="run-summary">
+            <Pill tone={RUN_STATUS[activeRun.status]?.tone || 'warn'}>{RUN_STATUS[activeRun.status]?.label || activeRun.status}</Pill>
+            <span>{runDetails(activeRun)}</span>
+            {runLog.file && <Button variant="ghost" onClick={() => openFolder(runLog.file)}>Open log file</Button>}
+          </div>
+        )}
+        {activeRun?.status === 'interrupted' && (
+          <span className="field-hint warn">This run never finished — the app was closed or the computer shut down while it was in progress. Its log ends where it stopped.</span>
+        )}
+        {activeId === APP_LOG && (
+          <span className="field-hint">The shared log for today, including scheduling and sign-in events that do not belong to a single run.</span>
+        )}
+        {hasUnloggedRuns && (
+          <span className="field-hint">Runs from before this version did not keep their own log. They still appear under Recent activity on the Overview.</span>
+        )}
+      </section>
+
+      <section className="log-viewer" ref={viewerRef} onScroll={onScroll}>
+        {activeId !== APP_LOG && runLog.truncated && (
+          <div className="log-line"><span>…</span><code>Earlier lines omitted. Open the log file to see everything.</code></div>
+        )}
+        {lines.length
+          ? lines.map((line, index) => <div className="log-line" key={`${index}-${line}`}><span>{String(index + 1).padStart(3, '0')}</span><code>{line}</code></div>)
+          : <EmptyState
+              title={activeId === APP_LOG ? 'No logs yet' : 'Nothing logged yet'}
+              text={activeId === APP_LOG ? 'Run a backup or storage test to see activity here.' : 'This run has not written anything yet.'}
+            />}
+      </section>
+    </div>
+  );
 }
 
 function Settings({ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard, updateState, checkForUpdates, installUpdate, openFolder, dirty, saving, onSave }) {
@@ -2094,7 +2217,7 @@ export default function App() {
   if (page === 'sources') content = <Sources {...{ config, setConfig, chooseDirectory, googleAccount, notify, openFolder, onRestore: openRestoreDialog, dirty, saving, onSave: save }} />;
   if (page === 'storage') content = <Storage {...{ config, setConfig, chooseDirectory, testStorage, verifyStorage, verifyingProfile, startGoogleAuth, testingProfile, notify, googleAccounts, dirty, saving, onSave: save }} />;
   if (page === 'restore') content = <Restore {...{ config, onRestore: openRestoreDialog, openFolder }} />;
-  if (page === 'logs') content = <Logs {...{ logs, refreshLogs, operationLogs }} />;
+  if (page === 'logs') content = <Logs {...{ logs, refreshLogs, operation, openFolder }} />;
   if (page === 'settings') content = <Settings {...{ config, setConfig, testEmail, emailTesting, schedulerState, systemInfo, onOpenWizard: () => setShowWizard(true), updateState, checkForUpdates, installUpdate, openFolder, dirty, saving, onSave: save }} />;
 
   return (

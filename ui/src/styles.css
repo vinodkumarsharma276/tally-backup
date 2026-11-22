@@ -336,3 +336,8 @@ main { min-width:0; overflow:hidden; }.topbar { height:80px; padding:0 36px; bor
 .wizard-step-body>.eyebrow{color:#4fd7a6}
 @media(max-width:820px){.wizard{grid-template-columns:1fr}.wizard-sidebar{display:none}.wizard-choice-grid,.wizard-summary{grid-template-columns:1fr}}
 ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-track{background:#071018}::-webkit-scrollbar-thumb{background:#20343f;border-radius:10px;border:2px solid #071018}
+.run-picker{display:flex;flex-direction:column;gap:12px}
+.run-picker .field{max-width:640px}
+.run-summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11px;color:#7f929e}
+.run-summary .button{margin-left:auto}
+[data-theme='light'] .run-summary{color:#4d6270}

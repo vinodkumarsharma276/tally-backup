@@ -37,6 +37,14 @@ const { signInWithGoogle, cancelSignIn } = require('./googleSignIn');
 const { readSession, saveSession, clearSession, deviceIdentity } = require('./session');
 const { describeAnomaly } = require('./anomalies');
 const {
+  createRunLog,
+  readRunLog,
+  listRunLogIds,
+  readOrphanRuns,
+  mergeRuns,
+  pruneRunLogs,
+} = require('./runLog');
+const {
   migrateConfigSecrets,
   sanitizeConfigForRenderer,
   secureConfigFromRenderer,
@@ -86,6 +94,11 @@ function configPath() {
 function logsDirectory() {
   if (!app.isPackaged) return path.join(appRoot(), 'logs');
   return configPathManager.getLogsDir();
+}
+
+// One file per backup or restore run; see runLog.js.
+function runLogsDirectory() {
+  return path.join(logsDirectory(), 'runs');
 }
 
 async function ensureConfig() {
@@ -737,9 +750,13 @@ function emit(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
-function consumeOutput(stream, runId, streamName) {
+function consumeOutput(stream, runId, streamName, runLog = null) {
   if (!stream) return;
   const lines = readline.createInterface({ input: stream });
+  const logLine = (line) => {
+    emit('operation:log', { runId, stream: streamName, line });
+    if (runLog) runLog.write(line);
+  };
   lines.on('line', (rawLine) => {
     const line = cleanTerminalText(rawLine);
     if (!line) return;
@@ -748,25 +765,29 @@ function consumeOutput(stream, runId, streamName) {
         const progress = JSON.parse(line.slice(PROGRESS_PREFIX.length));
         if (progress.kind === 'repo-conflict') {
           emit('repo:conflict', progress);
-          appendDesktopLog(`Repository conflict (${progress.status}) for profile '${progress.profileName}'.`);
+          const message = `Repository conflict (${progress.status}) for profile '${progress.profileName}'.`;
+          appendDesktopLog(message);
+          if (runLog) runLog.write(message);
           return;
         }
         if (progress.kind === 'anomaly') {
           emit('operation:anomaly', progress);
           const { log, notify } = describeAnomaly(progress);
           appendDesktopLog(log);
+          if (runLog) runLog.write(log);
           if (notify) showNotification(notify.title, notify.body, notify.tone);
           return;
         }
+        // Progress ticks drive the bar and the tray; they are not log lines.
         latestProgress = { runId, ...progress };
         emit('operation:progress', latestProgress);
         setTrayState('running', progressTooltip(progress, currentOperation));
       } catch {
-        emit('operation:log', { runId, stream: streamName, line });
+        logLine(line);
       }
       return;
     }
-    emit('operation:log', { runId, stream: streamName, line });
+    logLine(line);
   });
 }
 
@@ -820,6 +841,17 @@ function startChildOperation(type, args = {}) {
   );
 
   const startedAt = new Date().toISOString();
+  // Sign-in is not a backup or restore, so it gets no run log of its own.
+  const runLog = isAuth
+    ? null
+    : createRunLog(runLogsDirectory(), {
+        runId,
+        type,
+        origin: args.origin || 'manual',
+        sourceName: args.sourceName || null,
+        profileName: args.profileName || null,
+        startedAt,
+      });
   if (!isAuth) {
     currentOperation = {
       runId,
@@ -834,12 +866,18 @@ function startChildOperation(type, args = {}) {
     setTrayState('running', `${APP_NAME} — ${type === 'restore' ? 'Restoring…' : 'Backing up…'}`);
     emit('operation:state', { ...currentOperation, child: undefined, status: 'running' });
   }
-  consumeOutput(child.stdout, runId, 'stdout');
-  consumeOutput(child.stderr, runId, 'stderr');
+  consumeOutput(child.stdout, runId, 'stdout', runLog);
+  consumeOutput(child.stderr, runId, 'stderr', runLog);
 
   child.on('error', (error) => {
     emit('operation:log', { runId, stream: 'stderr', line: error.message });
+    if (runLog) runLog.write(error.message);
     appendDesktopLog(`${type} process error: ${error.message}`);
+  });
+  // 'close' rather than 'exit': it fires only once stdout and stderr are drained,
+  // so the footer lands after the run's last line instead of before it.
+  child.on('close', (code, signal) => {
+    if (runLog) runLog.close({ status: code === 0 ? 'success' : 'failed', code, signal });
   });
   child.on('exit', async (code, signal) => {
     if (isAuth) {
@@ -863,6 +901,7 @@ function startChildOperation(type, args = {}) {
     currentOperation = null;
     // Written before the UI is told, so a refresh sees this run.
     await recordRun({
+      runId,
       type,
       status: completed.status,
       origin: completed.origin,
@@ -908,14 +947,42 @@ async function readRunHistory() {
 }
 
 async function recordRun(entry) {
+  let kept = null;
   try {
     const history = await readRunHistory();
     history.push(entry);
+    kept = history.slice(-RUN_HISTORY_LIMIT);
     await fs.ensureDir(path.dirname(runHistoryPath()));
-    await fs.writeJson(runHistoryPath(), history.slice(-RUN_HISTORY_LIMIT), { spaces: 2 });
+    await fs.writeJson(runHistoryPath(), kept, { spaces: 2 });
   } catch (error) {
     appendDesktopLog(`Could not record run history: ${error.message}`);
   }
+  // Run logs live as long as their history entry, plus a grace period for runs
+  // that never got one. Housekeeping failures are not worth reporting.
+  if (kept) {
+    const keepIds = new Set(kept.map((run) => run.runId).filter(Boolean));
+    await pruneRunLogs(runLogsDirectory(), keepIds).catch(() => {});
+  }
+}
+
+// Every run the Activity logs page can show, newest first.
+async function listRuns() {
+  const dir = runLogsDirectory();
+  const history = (await readRunHistory()).slice().reverse();
+  const logIds = await listRunLogIds(dir);
+  const current = currentOperation
+    ? {
+        runId: currentOperation.runId,
+        type: currentOperation.type,
+        origin: currentOperation.origin,
+        sourceName: currentOperation.sourceName,
+        startedAt: currentOperation.startedAt,
+      }
+    : null;
+  const known = new Set(history.map((run) => run.runId).filter(Boolean));
+  if (current) known.add(current.runId);
+  const orphans = await readOrphanRuns(dir, [...logIds].filter((id) => !known.has(id)));
+  return mergeRuns({ history, logIds, orphans, current });
 }
 
 function safeStartOperation(type, args = {}) {
@@ -1146,6 +1213,10 @@ function registerIpc() {
     }
   });
   ipcMain.handle('logs:get', async (_event, limit) => readLogTail(limit));
+  ipcMain.handle('runs:list', async () => listRuns());
+  // readRunLog rejects anything that is not a run id, so the renderer cannot
+  // use this to read an arbitrary file.
+  ipcMain.handle('runs:log', async (_event, runId) => readRunLog(runLogsDirectory(), runId));
   ipcMain.handle('email:test', async () => {
     const config = await loadConfig();
     if (!config.email || !config.email.enabled) throw new Error('Email is disabled in configuration.');
