@@ -17,6 +17,9 @@ test suites, bumps `package.json`, pushes the commit to `main` over SSH using th
 
 ### Option B — by hand
 
+Needs no deploy key: the tag-push path only reads the commit it is given. Use this
+when `RELEASE_SSH_KEY` is missing or broken.
+
 ```powershell
 # 1. Bump the version on a branch (must be higher than the last release)
 git switch -c release/0.1.2
@@ -59,12 +62,34 @@ appears under **Releases** with:
 
 ## Repo secrets (Settings → Secrets and variables → Actions)
 
-- `RELEASE_SSH_KEY` — **required for Option A.** Private half of the repo's
+- `RELEASE_SSH_KEY` — **required for Option A only.** Private half of the repo's
   write-enabled deploy key ("Release automation"). `main` grants ruleset bypass to
   deploy keys only, so this is what lets the workflow push the version bump. No
-  human, including an admin, can push to `main`. To rotate: delete the deploy key
-  under Settings → Deploy keys, generate a new `ed25519` pair, add the public half
-  with write access, and replace this secret with the private half.
+  human, including an admin, can push to `main`. Option B never pushes, so it does
+  not need this key.
+
+  **If a dispatched release fails at `prepare` with `git@github.com: Permission
+  denied (publickey)`**, the secret holds a key whose public half GitHub does not
+  accept for this repository. Rotate it:
+
+  ```bash
+  ssh-keygen -t ed25519 -C "release automation" -f release_key -N ""
+  ```
+
+  Add `release_key.pub` under **Settings → Deploy keys → Add deploy key** with
+  **Allow write access** ticked, then paste the *entire* contents of `release_key`
+  — including the `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END-----` lines
+  and the trailing newline — into the secret. Delete both local files afterwards.
+
+  What usually goes wrong:
+  - the public half was never added, or was added to a different repository;
+  - **Allow write access** was left unticked;
+  - the key is PuTTY `.ppk` rather than OpenSSH format;
+  - the key has a passphrase, which the workflow cannot unlock (`-N ""` avoids it);
+  - the same public key is already a deploy key on another repository — GitHub
+    allows a given key on only one, and silently refuses the second;
+  - it was stored on the **Variables** tab rather than **Secrets**, in which case
+    `prepare` falls back to the token and fails later, when it tries to push.
 - `GOOGLE_OAUTH_CLIENT` — contents of `config/google-oauth-client.json`, so shipped
   builds can "Connect Google" (the file is git-ignored, so CI injects it).
 - `CSC_LINK` + `CSC_KEY_PASSWORD` — Windows code-signing certificate, to remove the
