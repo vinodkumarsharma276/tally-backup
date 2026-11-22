@@ -25,7 +25,7 @@ export const company = {
 export const product = {
   name: 'Backup Genie',
   downloadsEnabled: false,
-  version: 'v0.0.1',
+  version: 'v0.0.2',
   versionLabel: 'Starter · Early access',
   headline: 'Any folder. Any day. Back in one click.',
   subhead:
@@ -114,19 +114,19 @@ export const steps = [
 export const roadmap = [
   {
     status: 'live',
-    label: 'In v0.0.1',
+    label: 'In v0.0.2',
     title: 'Versioned backup & restore engine',
     body: 'Incremental, deduplicated snapshots of any folder, with point-in-time restore, verification and retention.',
   },
   {
     status: 'live',
-    label: 'In v0.0.1',
+    label: 'In v0.0.2',
     title: 'Scheduling, tray app & email reports',
     body: 'Background scheduler, desktop notifications and per-run report emails from our servers.',
   },
   {
     status: 'live',
-    label: 'In v0.0.1',
+    label: 'In v0.0.2',
     title: 'Multiple sources, one Google Drive',
     body: 'Starter protects multiple folders using one Google Drive profile. Restore points and scheduling remain available.',
   },
@@ -245,7 +245,7 @@ export const faqs = [
     a: 'Transfers are TLS-protected and storage credentials are kept in the operating system credential vault rather than in config files. The managed tier adds encryption at rest and tenant isolation.',
   },
   {
-    q: 'What is in v0.0.1 versus the roadmap?',
+    q: 'What is in v0.0.2 versus the roadmap?',
     a: 'Starter includes versioned backup and restore, scheduling, multiple source folders and one Google Drive profile. Company email reports require a provisioned account and licence key. Extra storage providers, SISU, data hiding and access control are not included.',
   },
   {
