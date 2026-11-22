@@ -35,6 +35,7 @@ const { acceptRepository } = require('../src/versioning/RepoMarker');
 const { googleConfigFor, hasOwnAccount, connectTokenRef } = require('../src/utils/googleAuth');
 const { signInWithGoogle, cancelSignIn } = require('./googleSignIn');
 const { readSession, saveSession, clearSession, deviceIdentity } = require('./session');
+const { describeAnomaly } = require('./anomalies');
 const {
   migrateConfigSecrets,
   sanitizeConfigForRenderer,
@@ -752,12 +753,9 @@ function consumeOutput(stream, runId, streamName) {
         }
         if (progress.kind === 'anomaly') {
           emit('operation:anomaly', progress);
-          appendDesktopLog(`Anomaly: ${progress.type} for '${progress.sourceName}' (${progress.percentReuploaded}% re-uploaded).`);
-          showNotification(
-            'Check your backup storage',
-            `${progress.sourceName}: ${progress.percentReuploaded}% of data was re-uploaded. The destination may have been reset.`,
-            'failed'
-          );
+          const { log, notify } = describeAnomaly(progress);
+          appendDesktopLog(log);
+          if (notify) showNotification(notify.title, notify.body, notify.tone);
           return;
         }
         latestProgress = { runId, ...progress };
