@@ -50,6 +50,8 @@ class PackedObjectStore {
     this._pendingBytes = 0;
     this._lock = Promise.resolve();
     this._packCache = new Map(); // packId -> Buffer (LRU)
+    this._orphanIndexes = []; // index files whose pack blob is missing
+    this._orphanPacks = []; // pack blobs with no index, hence unreachable
   }
 
   _packKey(id) { return `${this.packPrefix}/${id}`; }
@@ -68,12 +70,33 @@ class PackedObjectStore {
     if (!this._loadPromise) {
       this._loadPromise = (async () => {
         const index = new Map();
+        // One recursive listing covers both the pack blobs and their indexes, so
+        // a half-deleted pack can be spotted without a second round trip.
         let keys = [];
-        try { keys = await this.backend.list(`${this.idxPrefix}/`); } catch { keys = []; }
+        try { keys = await this.backend.list(this.packPrefix); } catch { keys = []; }
+
+        const blobIds = new Set();
+        const idxIds = new Set();
+        const blobPrefix = `${this.packPrefix}/`;
+        const idxPrefix = `${this.idxPrefix}/`;
         for (const key of keys) {
-          const base = key.split('/').pop();
-          if (!base || !base.endsWith('.json')) continue;
-          const packId = base.slice(0, -5);
+          if (key.startsWith(idxPrefix)) {
+            const base = key.slice(idxPrefix.length);
+            if (base.endsWith('.json') && !base.includes('/')) idxIds.add(base.slice(0, -5));
+          } else if (key.startsWith(blobPrefix)) {
+            const base = key.slice(blobPrefix.length);
+            if (base && !base.includes('/')) blobIds.add(base);
+          }
+        }
+
+        const orphanIndexes = [];
+        for (const packId of idxIds) {
+          // An index whose pack blob is gone must never enter the index. Its
+          // hashes would make `has()` report those chunks as stored, `put()`
+          // would skip re-uploading them, and the next snapshot would reference
+          // data that cannot be read back. Treating the index as absent means
+          // the chunks are simply uploaded again; `gc()` removes the stale file.
+          if (!blobIds.has(packId)) { orphanIndexes.push(packId); continue; }
           let raw;
           try { raw = await this.backend.get(this._idxKey(packId)); } catch { continue; }
           let doc;
@@ -82,6 +105,10 @@ class PackedObjectStore {
             index.set(hash, { packId, off: loc[0], len: loc[1] });
           }
         }
+
+        this._orphanIndexes = orphanIndexes;
+        // A pack with no index cannot be read by anything, so it is dead weight.
+        this._orphanPacks = [...blobIds].filter((id) => !idxIds.has(id));
         this._index = index;
       })();
     }
@@ -191,6 +218,19 @@ class PackedObjectStore {
       let deletedChunks = 0;
       let deletedPacks = 0;
       let rewrittenPacks = 0;
+      let repairedPacks = 0;
+
+      // Sweep what an interrupted compaction left behind before doing more work.
+      for (const packId of this._orphanIndexes) {
+        await this.backend.delete(this._idxKey(packId)).catch(() => {});
+        repairedPacks += 1;
+      }
+      this._orphanIndexes = [];
+      for (const packId of this._orphanPacks) {
+        await this.backend.delete(this._packKey(packId)).catch(() => {});
+        deletedPacks += 1;
+      }
+      this._orphanPacks = [];
 
       for (const [packId, chunks] of byPack) {
         const live = chunks.filter((c) => referenced.has(c.hash));
@@ -198,8 +238,12 @@ class PackedObjectStore {
         if (dead === 0) continue;
 
         if (live.length === 0) {
-          await this.backend.delete(this._packKey(packId));
+          // Index first, always. While the index is gone the blob is merely
+          // unreachable, so an interruption here wastes space. Deleting the blob
+          // first would leave an index pointing at data that no longer exists,
+          // which poisons every later run.
           await this.backend.delete(this._idxKey(packId));
+          await this.backend.delete(this._packKey(packId));
           for (const c of chunks) this._index.delete(c.hash);
           this._packCache.delete(packId);
           deletedChunks += dead;
@@ -208,7 +252,20 @@ class PackedObjectStore {
         }
 
         // Partial: rewrite the pack with only the live chunks.
-        const blob = await this._getPack(packId);
+        let blob;
+        try {
+          blob = await this._getPack(packId);
+        } catch (error) {
+          // The index survived its pack — an interruption from before the
+          // ordering above was fixed, or a deletion outside the app. Drop the
+          // entries so the chunks are uploaded again on the next run, and take
+          // the stale index with them rather than failing the whole collection.
+          await this.backend.delete(this._idxKey(packId)).catch(() => {});
+          for (const c of chunks) this._index.delete(c.hash);
+          this._packCache.delete(packId);
+          repairedPacks += 1;
+          continue;
+        }
         const parts = [];
         const entries = {};
         let off = 0;
@@ -223,8 +280,9 @@ class PackedObjectStore {
         await this.backend.put(this._packKey(newPackId), newBlob);
         await this.backend.put(this._idxKey(newPackId), Buffer.from(JSON.stringify({ v: 1, packId: newPackId, entries }), 'utf8'));
         if (newPackId !== packId) {
-          await this.backend.delete(this._packKey(packId));
+          // Index before blob, for the same reason as above.
           await this.backend.delete(this._idxKey(packId));
+          await this.backend.delete(this._packKey(packId));
         }
         this._packCache.delete(packId);
         for (const c of chunks) this._index.delete(c.hash);
@@ -234,7 +292,7 @@ class PackedObjectStore {
         deletedChunks += dead;
         rewrittenPacks += 1;
       }
-      return { deletedChunks, deletedPacks, rewrittenPacks };
+      return { deletedChunks, deletedPacks, rewrittenPacks, repairedPacks };
     });
   }
 }
